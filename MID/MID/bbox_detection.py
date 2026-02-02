@@ -2,9 +2,8 @@ import cv2
 import numpy as np
 
 
-def draw_bounding_boxes(
+def detect_geometry_bounding_boxes(
     edges,
-    overlay,
     min_area=200,
     max_area=200000,
     min_aspect=0.1,
@@ -12,13 +11,17 @@ def draw_bounding_boxes(
     scale=1.3
 ):
     """
-    Detects contours and draws filtered bounding boxes.
+    Detects bounding boxes from contours using geometric heuristics.
+
+    Returns:
+        List of boxes: [(x1, y1, x2, y2), ...]
     """
     contours, _ = cv2.findContours(
         edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
 
-    h_img, w_img = overlay.shape[:2]
+    h_img, w_img = edges.shape
+    boxes = []
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
@@ -34,35 +37,60 @@ def draw_bounding_boxes(
         cx, cy = x + w // 2, y + h // 2
         new_w, new_h = int(w * scale), int(h * scale)
 
-        x2 = max(0, cx - new_w // 2)
-        y2 = max(0, cy - new_h // 2)
-        x3 = min(w_img, cx + new_w // 2)
-        y3 = min(h_img, cy + new_h // 2)
+        x1 = max(0, cx - new_w // 2)
+        y1 = max(0, cy - new_h // 2)
+        x2 = min(w_img, cx + new_w // 2)
+        y2 = min(h_img, cy + new_h // 2)
 
+        boxes.append((x1, y1, x2, y2))
+
+    return boxes
+
+
+def draw_geometry_bounding_boxes(
+    overlay,
+    boxes,
+    color=(0, 255, 0),
+    thickness=2
+):
+    """
+    Draws bounding boxes on the overlay.
+    """
+    for (x1, y1, x2, y2) in boxes:
         cv2.rectangle(
             overlay,
+            (x1, y1),
             (x2, y2),
-            (x3, y3),
-            (0, 255, 0),
-            2
+            color,
+            thickness
         )
 
 
-def draw_raw_contours(edges, overlay):
+def detect_geometry_contours(edges):
     """
-    Draws raw contours for debugging.
+    Detects raw contours (debug / analysis).
     """
     contours, _ = cv2.findContours(
         edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
-
-    for cnt in contours:
-        cv2.drawContours(overlay, [cnt], -1, (0, 0, 255), 2)
+    return contours
 
 
-def draw_circle_boxes(
-    gray,
+def draw_geometry_contours(
     overlay,
+    contours,
+    color=(0, 0, 255),
+    thickness=2
+):
+    """
+    Draws contours on the overlay.
+    """
+    for cnt in contours:
+        cv2.drawContours(overlay, [cnt], -1, color, thickness)
+
+
+def detect_geometry_circle_boxes(
+    gray,
     dp=1,
     min_dist=20,
     param1=100,
@@ -71,7 +99,10 @@ def draw_circle_boxes(
     max_radius=0
 ):
     """
-    Detects circles using the Hough Circle Transform and draws them.
+    Detects circles using the Hough Circle Transform.
+
+    Returns:
+        List of circles: [(x, y, r), ...]
     """
     circles = cv2.HoughCircles(
         gray,
@@ -87,10 +118,18 @@ def draw_circle_boxes(
     if circles is None:
         return []
 
-    circles = np.round(circles[0, :]).astype("int")
+    return np.round(circles[0, :]).astype("int")
 
+
+def draw_geometry_circles(
+    overlay,
+    circles,
+    color=(255, 0, 0)
+):
+    """
+    Draws detected circles.
+    """
     for (x, y, r) in circles:
-        cv2.circle(overlay, (x, y), r, (255, 0, 0), 2)
-        cv2.circle(overlay, (x, y), 2, (255, 0, 0), 3)
+        cv2.circle(overlay, (x, y), r, color, 2)
+        cv2.circle(overlay, (x, y), 2, color, 3)
 
-    return circles
