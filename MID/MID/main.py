@@ -13,6 +13,7 @@ from bbox_detection import (
 )
 
 from ground_detection_tensorflow import (
+    init_ground_model,
     detect_ground_mask,
     detect_ground_line_from_mask,
     draw_ground_mask,
@@ -30,6 +31,10 @@ from object_detection_tensorflow import (
     detect_objects,
     draw_object_boxes
 )
+
+# initialisation of modules
+init_ground_model()
+
 
 # ==========================
 # Camera initialization
