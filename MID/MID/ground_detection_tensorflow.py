@@ -3,33 +3,53 @@ import numpy as np
 import tensorflow as tf
 
 # ==========================
-# LOAD MODEL (ONCE)
+# GLOBAL MODEL HANDLES
 # ==========================
-print("[TensorFlow] Loading ground segmentation model...")
+_BACKBONE = None
+_SEGMENTATION_HEAD = None
 
-BACKBONE = tf.keras.applications.MobileNetV2(
-    input_shape=(224, 224, 3),
-    include_top=False,
-    weights="imagenet"
-)
-
-BACKBONE.trainable = False
-
-SEGMENTATION_HEAD = tf.keras.Sequential([
-    tf.keras.layers.Conv2D(256, 3, padding="same", activation="relu"),
-    tf.keras.layers.Conv2D(1, 1, activation="sigmoid")
-])
 
 # ==========================
-# DETECT GROUND MASK (IA)
+# INITIALIZATION
+# ==========================
+def init_ground_model(input_size=(224, 224)):
+    """
+    Initializes the ground segmentation model.
+    Must be called ONCE before detection.
+    """
+    global _BACKBONE, _SEGMENTATION_HEAD
+
+    if _BACKBONE is not None:
+        return  # already initialized
+
+    print("[TensorFlow] Initializing ground segmentation model...")
+
+    _BACKBONE = tf.keras.applications.MobileNetV2(
+        input_shape=(input_size[0], input_size[1], 3),
+        include_top=False,
+        weights="imagenet"
+    )
+    _BACKBONE.trainable = False
+
+    _SEGMENTATION_HEAD = tf.keras.Sequential([
+        tf.keras.layers.Conv2D(256, 3, padding="same", activation="relu"),
+        tf.keras.layers.Conv2D(1, 1, activation="sigmoid")
+    ])
+
+
+# ==========================
+# IA — MASK PREDICTION
 # ==========================
 def detect_ground_mask(frame_bgr):
     """
-    Uses a CNN to predict a ground probability mask.
-
-    Returns:
-    - mask (H, W) uint8 {0,1}
+    Predicts a ground probability mask using CNN features.
     """
+    if _BACKBONE is None or _SEGMENTATION_HEAD is None:
+        raise RuntimeError(
+            "Ground model not initialized. "
+            "Call init_ground_model() first."
+        )
+
     h, w = frame_bgr.shape[:2]
 
     img_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -37,8 +57,8 @@ def detect_ground_mask(frame_bgr):
     img = img_resized.astype(np.float32) / 255.0
     img = np.expand_dims(img, axis=0)
 
-    features = BACKBONE(img, training=False)
-    mask = SEGMENTATION_HEAD(features, training=False)[0, :, :, 0].numpy()
+    features = _BACKBONE(img, training=False)
+    mask = _SEGMENTATION_HEAD(features, training=False)[0, :, :, 0].numpy()
 
     mask = cv2.resize(mask, (w, h))
     mask = (mask > 0.5).astype(np.uint8)
@@ -47,11 +67,11 @@ def detect_ground_mask(frame_bgr):
 
 
 # ==========================
-# EXTRACT GROUND LINE
+# GEOMETRY — GROUND LINE
 # ==========================
 def detect_ground_line_from_mask(mask):
     """
-    Extracts the ground line as the lowest dominant foreground region.
+    Extracts the ground line as the lowest foreground pixel per column.
     """
     h, w = mask.shape
     y_candidates = []
@@ -87,8 +107,8 @@ def draw_ground_line(overlay, y):
         return
 
     h, w = overlay.shape[:2]
-    cv2.line(overlay, (0, y), (w, y), (255, 0, 0), 4)
 
+    cv2.line(overlay, (0, y), (w, y), (255, 0, 0), 4)
     cv2.putText(
         overlay,
         "GROUND (AI)",
