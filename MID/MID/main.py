@@ -12,6 +12,15 @@ from bbox_detection import (
     draw_geometry_circles
 )
 
+from ground_detection_tensorflow import (
+    detect_ground_mask,
+    detect_ground_line_from_mask,
+    draw_ground_mask,
+    draw_ground_line
+)
+
+
+
 from ground_detection import (
     detect_ground,
     detect_ground_hough
@@ -90,6 +99,13 @@ while True:
         # Ground detection (Hough)
         # ==========================
         detect_ground_hough(edges, overlay)
+
+    if 1:
+        ground_mask = detect_ground_mask(frame)
+        ground_y = detect_ground_line_from_mask(ground_mask)
+
+        draw_ground_mask(overlay, ground_mask)
+        draw_ground_line(overlay, ground_y)
 
     # ==========================
     # Display
