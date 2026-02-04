@@ -5,9 +5,12 @@ MinstormObjectDetection est un projet visant à implémenter une stratégie de d
 
 Contrairement à une approche classique reposant uniquement sur des capteurs de distance (télémètre) ou de collision (capteur tactile), ce projet introduit une détection intelligente basée sur la vision, permettant de :
 
-* identifier des obstacles visuellement,
-* qualifier leur présence de manière plus fiable,
-* intégrer ces informations directement dans la cartographie du robot.
+* identifier des obstacles visuellement
+* qualifier leur présence de manière plus fiable
+* intégrer ces informations directement dans la cartographie du robot
+
+
+L’IA sert actuellement à valider les algorithmes standards. L’architecture pourra évoluer pour que l’IA devienne décisionnaire, avec les algos standards en garde-fou, notamment si le projet est déployé sur un système embarqué type edge impulse.
 
 ## Principe général
 
@@ -34,9 +37,9 @@ Leur sortie produit une hypothèse d’obstacle (présence, position relative, t
 
 ### Détection basée sur l’IA (validation et plausibilisation)
 
-En complément, le projet intègre des algorithmes de détection basés sur IA, reposant exclusivement sur des modèles publics pré‑entraînés (TensorFlow).
+Le projet intègre des algorithmes de détection basés sur IA, reposant exclusivement sur des modèles publics pré‑entraînés (TensorFlow).
 
-Ces algorithmes ne constituent pas la source décisionnelle principale. Leur rôle est de confirmer, invalider ou nuancer les résultats issus des algorithmes standards. La détection IA permet de :
+Ces algorithmes ne constituent pas la source décisionnelle principale. Leur rôle est de confirmer ou invalider les résultats issus des algorithmes standards. La détection IA permet de :
 
 * vérifier la cohérence d’une détection standard (plausibilisation),
 * réduire les faux positifs dus à des artefacts visuels,
