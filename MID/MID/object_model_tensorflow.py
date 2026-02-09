@@ -5,6 +5,13 @@ import tensorflow_hub as hub
 
 
 # ==========================
+# GLOBAL STATE
+# ==========================
+_MODEL = None
+_INITIALIZED = False
+
+
+# ==========================
 # COCO LABELS
 # ==========================
 LABELS = [
@@ -26,30 +33,56 @@ LABELS = [
 
 
 # ==========================
-# LOAD MODEL (ONCE)
+# INIT 1 — STRUCTURE
 # ==========================
-print("[TensorFlow] Loading object detection model...")
-MODEL = hub.load("https://tfhub.dev/tensorflow/ssd_mobilenet_v2/2")
+def init_model():
+    """
+    Loads the TensorFlow object detection model.
+    Must be called once at startup.
+    """
+    global _MODEL, _INITIALIZED
+
+    if _INITIALIZED:
+        return
+
+    print("[ObjectModelTF] Loading object detection model...")
+    _MODEL = hub.load("https://tfhub.dev/tensorflow/ssd_mobilenet_v2/2")
+    _INITIALIZED = True
 
 
 # ==========================
-# OBJECT DETECTION
+# INIT 2 — FROM FRAME (OPTIONAL)
 # ==========================
-def detect_objects(frame_bgr):
+def init_model_from_frame(frame=None):
+    """
+    Placeholder for interface consistency.
+    TensorFlow model does not require frame-based init.
+    """
+    pass
+
+
+# ==========================
+# PREDICTION
+# ==========================
+def predict_objects(frame_bgr):
     """
     Runs TensorFlow object detection on a BGR frame.
 
     Returns:
-    - boxes   : [N, 4] in normalized coordinates
-    - scores  : [N]
-    - classes : [N]
+        boxes   : [N, 4] normalized (ymin, xmin, ymax, xmax)
+        scores  : [N]
+        classes : [N]
     """
-    img_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    if not _INITIALIZED:
+        raise RuntimeError(
+            "Object TF model not initialized. Call init_model() first."
+        )
 
+    img_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     image_tensor = tf.convert_to_tensor(img_rgb, dtype=tf.uint8)
     image_tensor = tf.expand_dims(image_tensor, 0)
 
-    outputs = MODEL(image_tensor)
+    outputs = _MODEL(image_tensor)
 
     boxes = outputs["detection_boxes"][0].numpy()
     scores = outputs["detection_scores"][0].numpy()
@@ -59,10 +92,10 @@ def detect_objects(frame_bgr):
 
 
 # ==========================
-# DRAW OBJECT BOUNDING BOXES
+# RENDERING
 # ==========================
 def draw_object_boxes(
-    frame,
+    overlay,
     boxes,
     scores,
     classes,
@@ -71,14 +104,13 @@ def draw_object_boxes(
     """
     Draws object bounding boxes detected by TensorFlow.
     """
-    h, w, _ = frame.shape
+    h, w, _ = overlay.shape
 
     for i in range(len(scores)):
         if scores[i] < score_threshold:
             continue
 
         ymin, xmin, ymax, xmax = boxes[i]
-
         x1, y1 = int(xmin * w), int(ymin * h)
         x2, y2 = int(xmax * w), int(ymax * h)
 
@@ -86,14 +118,13 @@ def draw_object_boxes(
         label = LABELS[class_id] if class_id < len(LABELS) else f"class {class_id}"
         text = f"{label} ({scores[i] * 100:.1f}%)"
 
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 0), 2)
         cv2.putText(
-            frame,
+            overlay,
             text,
-            (x1, y1 - 10),
+            (x1, max(20, y1 - 10)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
             (0, 255, 0),
             2
         )
-
