@@ -4,7 +4,7 @@ import cv2
 # ==========================
 # INITIALIZATION
 # ==========================
-def init_model():
+def init_bbox_model_standard():
     """
     Initialize the bounding box model.
     Currently stateless (placeholder).
@@ -12,17 +12,17 @@ def init_model():
     print("[BBoxModel] init_model called (placeholder)")
 
 
-def init_model_from_frame(frame=None):
+def calibrate_bbox_model_standard(frame=None):
     """
     Optional initialization from a frame.
     """
-    print("[BBoxModel] init_model_from_frame called (placeholder)")
+    print("[BBoxModel] calibrate_model called (placeholder)")
 
 
 # ==========================
 # DETECTION — BOUNDING BOXES
 # ==========================
-def detect_bounding_boxes(
+def detect_bbox_standard(
     edges,
     min_area=200,
     max_area=200000,
@@ -63,7 +63,7 @@ def detect_bounding_boxes(
 # ==========================
 # DRAWING
 # ==========================
-def draw_bounding_boxes(
+def draw_bbox_standard(
     overlay,
     boxes,
     color=(0, 255, 0),
