@@ -5,7 +5,7 @@ import cv2
 # ==========================
 # INITIALIZATION
 # ==========================
-def init_model():
+def init_contour_model_standard():
     """
     Initialize the contour model.
     Stateless placeholder.
@@ -13,17 +13,17 @@ def init_model():
     print("[ContourModel] init_model called (placeholder)")
 
 
-def init_model_from_frame(frame=None):
+def calibrate_contour_model_standard(frame=None):
     """
     Optional initialization from a frame.
     """
-    print("[ContourModel] init_model_from_frame called (placeholder)")
+    print("[ContourModel] calibrate_model called (placeholder)")
 
 
 # ==========================
 # DETECTION — CONTOURS
 # ==========================
-def detect_contours(edges):
+def detect_contour_standard(edges):
     contours, _ = cv2.findContours(
         edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
@@ -33,7 +33,7 @@ def detect_contours(edges):
 # ==========================
 # DRAWING
 # ==========================
-def draw_contours(
+def draw_contour_standard(
     overlay,
     contours,
     color=(0, 0, 255),
