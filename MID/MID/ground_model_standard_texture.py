@@ -7,41 +7,33 @@ import numpy as np
 # ==========================
 _GROUND_MEAN = None
 _GROUND_STD = None
-_GROUND_READY = False
 _GROUND_ROI_RATIO = 0.6
 
 
 # ==========================
 # INITIALIZATION — STRUCTURE
 # ==========================
-def init_ground_model(roi_ratio=0.6):
+def init_ground_model_standard_texture():
     """
     Initializes the ground model structure and parameters.
     Texture learning must be done separately from a frame.
     """
-    global _GROUND_ROI_RATIO, _GROUND_READY
+    global _GROUND_ROI_RATIO
 
-    _GROUND_ROI_RATIO = roi_ratio
-    _GROUND_READY = False
+    _GROUND_ROI_RATIO = 0.6
 
     print("[GroundModel] Structure initialized")
 
-
-def is_ground_model_initialized():
-    """
-    Returns True if the ground texture has been learned.
-    """
-    return _GROUND_READY
 
 
 # ==========================
 # INITIALIZATION — PERCEPTION
 # ==========================
-def init_ground_model_from_frame(frame_bgr):
+def calibrate_ground_model_texture(frame_bgr):
     """
     Learns ground color statistics from a single frame.
     """
-    global _GROUND_MEAN, _GROUND_STD, _GROUND_READY
+    global _GROUND_MEAN, _GROUND_STD
 
     print("[GroundModel] Learning ground texture...")
 
@@ -57,14 +49,13 @@ def init_ground_model_from_frame(frame_bgr):
     _GROUND_MEAN = np.mean(pixels, axis=0)
     _GROUND_STD = np.std(pixels, axis=0) + 1e-6
 
-    _GROUND_READY = True
     print("[GroundModel] Ground model ready")
 
 
 # ==========================
 # DETECTION — GROUND MASK
 # ==========================
-def detect_ground_mask(frame_bgr, std_factor=2.0):
+def detect_ground_mask_standard_texture(frame_bgr, std_factor=2.0):
     """
     Detects ground pixels based on learned HSV statistics.
     """
@@ -99,7 +90,7 @@ def detect_ground_mask(frame_bgr, std_factor=2.0):
 # ==========================
 # GEOMETRY — GROUND LINE
 # ==========================
-def detect_ground_line(mask):
+def detect_ground_line_standard_texture(mask):
     """
     Extracts the ground line as the median of the lowest
     detected ground pixel per column.
@@ -120,7 +111,7 @@ def detect_ground_line(mask):
 # ==========================
 # DRAWING
 # ==========================
-def draw_ground_mask(
+def draw_ground_mask_standard_texture(
     overlay,
     mask,
     color=(0, 255, 0),
@@ -142,7 +133,7 @@ def draw_ground_mask(
     )
 
 
-def draw_ground_line(
+def detect_ground_line_standard_texture(
     overlay,
     y,
     color=(0, 255, 0),
