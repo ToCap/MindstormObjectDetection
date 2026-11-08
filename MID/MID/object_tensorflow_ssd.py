@@ -35,7 +35,7 @@ LABELS = [
 # ==========================
 # INITIALIZATION - STRUCTURE
 # ==========================
-def init_object_tensorflow_ssd():
+def initialize():
     """
     Loads the TensorFlow object detection model.
     Must be called once at startup.
@@ -53,7 +53,7 @@ def init_object_tensorflow_ssd():
 # ==========================
 # INITIALIZATION — PERCEPTION
 # ==========================
-def calibrate_object_tensorflow_ssd(frame=None):
+def calibrate(ctx=None):
     """
     Placeholder for interface consistency.
     TensorFlow model does not require frame-based init.
@@ -64,9 +64,9 @@ def calibrate_object_tensorflow_ssd(frame=None):
 # ==========================
 # PREDICTION
 # ==========================
-def detect_object_tensorflow_ssd(frame_bgr):
+def detect(ctx):
     """
-    Runs TensorFlow object detection on a BGR frame.
+    Runs TensorFlow object detection on ctx.frame (BGR).
 
     Returns:
         boxes   : [N, 4] normalized (ymin, xmin, ymax, xmax)
@@ -75,9 +75,10 @@ def detect_object_tensorflow_ssd(frame_bgr):
     """
     if not _initialized :
         raise RuntimeError(
-            "Object TF model not initialized. Call init_object_tensorflow_ssd() first."
+            "Object TF model not initialized. Call initialize() first."
         )
 
+    frame_bgr = ctx.frame
     img_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     image_tensor = tf.convert_to_tensor(img_rgb, dtype=tf.uint8)
     image_tensor = tf.expand_dims(image_tensor, 0)
@@ -94,16 +95,16 @@ def detect_object_tensorflow_ssd(frame_bgr):
 # ==========================
 # RENDERING
 # ==========================
-def draw_object_tensorflow_ssd(
+def draw(
     overlay,
-    boxes,
-    scores,
-    classes,
+    result,
     score_threshold=0.5
 ):
     """
     Draws object bounding boxes detected by TensorFlow.
+    result: (boxes, scores, classes) as returned by detect().
     """
+    boxes, scores, classes = result
     h, w, _ = overlay.shape
 
     for i in range(len(scores)):

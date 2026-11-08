@@ -5,26 +5,26 @@ import numpy as np
 # ==========================
 # INITIALIZATION
 # ==========================
-def init_circle_standard_hough():
+def initialize():
     """
     Initialize the circle detection model.
     Stateless placeholder.
     """
-    print("[CircleModel] init_model called (placeholder)")
+    print("[CircleModel] initialize called (placeholder)")
 
 
-def calibrate_circle_standard_hough(frame=None):
+def calibrate(ctx=None):
     """
     Optional initialization from a frame.
     """
-    print("[CircleModel] calibrate_model called (placeholder)")
+    print("[CircleModel] calibrate called (placeholder)")
 
 
 # ==========================
 # DETECTION — HOUGH CIRCLES
 # ==========================
-def detect_circle_standard_hough(
-    gray,
+def detect(
+    ctx,
     dp=1,
     min_dist=20,
     param1=100,
@@ -32,6 +32,8 @@ def detect_circle_standard_hough(
     min_radius=0,
     max_radius=0
 ):
+    gray = ctx.gray
+
     circles = cv2.HoughCircles(
         gray,
         cv2.HOUGH_GRADIENT,
@@ -52,7 +54,7 @@ def detect_circle_standard_hough(
 # ==========================
 # DRAWING
 # ==========================
-def draw_circle_standard_hough(
+def draw(
     overlay,
     circles,
     color=(255, 0, 0)

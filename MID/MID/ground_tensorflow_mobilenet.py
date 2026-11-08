@@ -14,7 +14,7 @@ _GROUND_INPUT_SIZE = (224, 224)
 # ==========================
 # INITIALIZATION
 # ==========================
-def init_ground_tensorflow_mobilenet():
+def initialize():
     """
     Initializes the TensorFlow ground segmentation model.
     Must be called once before any detection.
@@ -41,26 +41,35 @@ def init_ground_tensorflow_mobilenet():
     ])
 
 
-def is_ground_tensorflow_mobilenet_initialized():
+def is_initialized():
     """
     Returns True if the ground model is initialized.
     """
     return _GROUND_BACKBONE is not None and _GROUND_HEAD is not None
 
 
+def calibrate(ctx=None):
+    """
+    Placeholder for interface consistency.
+    The model is pre-trained and needs no frame-based calibration.
+    """
+    pass
+
+
 # ==========================
 # DETECTION — GROUND MASK
 # ==========================
-def detect_ground_mask_tensorflow_mobilenet(frame_bgr, threshold=0.5):
+def detect(ctx, threshold=0.5):
     """
     Predicts a binary ground mask from a BGR frame.
     """
-    if not is_ground_tensorflow_mobilenet_initialized():
+    if not is_initialized():
         raise RuntimeError(
             "Ground model not initialized. "
-            "Call init_ground_tensorflow_mobilenet() first."
+            "Call initialize() first."
         )
 
+    frame_bgr = ctx.frame
     h, w = frame_bgr.shape[:2]
 
     img_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -80,7 +89,7 @@ def detect_ground_mask_tensorflow_mobilenet(frame_bgr, threshold=0.5):
 # ==========================
 # GEOMETRY — GROUND LINE
 # ==========================
-def detect_ground_line_tensorflow_mobilenet(mask):
+def detect_line(mask):
     """
     Extracts the ground line as the median of the lowest
     detected ground pixel per image column.
@@ -102,7 +111,7 @@ def detect_ground_line_tensorflow_mobilenet(mask):
 # ==========================
 # DRAWING
 # ==========================
-def draw_ground_mask_tensorflow_mobilenet(
+def draw(
     overlay,
     mask,
     color=(255, 0, 0),
@@ -124,7 +133,7 @@ def draw_ground_mask_tensorflow_mobilenet(
     )
 
 
-def draw_ground_line_tensorflow_mobilenet(
+def draw_line(
     overlay,
     y,
     color=(255, 0, 0),

@@ -4,32 +4,34 @@ import cv2
 # ==========================
 # INITIALIZATION
 # ==========================
-def init_bbox_standard_contour():
+def initialize():
     """
     Initialize the bounding box model.
     Currently stateless (placeholder).
     """
-    print("[BBoxModel] init_model called (placeholder)")
+    print("[BBoxModel] initialize called (placeholder)")
 
 
-def calibrate_bbox_standard_contour(frame=None):
+def calibrate(ctx=None):
     """
     Optional initialization from a frame.
     """
-    print("[BBoxModel] calibrate_model called (placeholder)")
+    print("[BBoxModel] calibrate called (placeholder)")
 
 
 # ==========================
 # DETECTION — BOUNDING BOXES
 # ==========================
-def detect_bbox_standard_contour(
-    edges,
+def detect(
+    ctx,
     min_area=200,
     max_area=200000,
     min_aspect=0.1,
     max_aspect=10,
     scale=1.3
 ):
+    edges = ctx.edges
+
     contours, _ = cv2.findContours(
         edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
@@ -63,7 +65,7 @@ def detect_bbox_standard_contour(
 # ==========================
 # DRAWING
 # ==========================
-def draw_bbox_standard_contour(
+def draw(
     overlay,
     boxes,
     color=(0, 255, 0),

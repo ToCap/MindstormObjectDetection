@@ -5,7 +5,7 @@ import numpy as np
 # ==========================
 # INITIALIZATION
 # ==========================
-def init_lines_standard_hough():
+def initialize():
     """
     Initializes the geometry model.
     Currently empty but kept for architectural consistency.
@@ -13,11 +13,18 @@ def init_lines_standard_hough():
     print("[GeometryModel] Initialized")
 
 
+def calibrate(ctx=None):
+    """
+    Placeholder for interface consistency.
+    """
+    pass
+
+
 # ==========================
 # DETECTION
 # ==========================
-def detect_lines_standard_hough(
-    edges,
+def detect(
+    ctx,
     threshold=100,
     min_line_length=0,
     max_line_gap=0
@@ -29,11 +36,13 @@ def detect_lines_standard_hough(
     Intended for debug / visualization purposes only.
 
     Parameters:
-    - edges: binary edge image (Canny output)
+    - ctx: FrameContext (uses ctx.edges, the binary Canny output)
 
     Returns:
     - list of detected lines (raw Hough output)
     """
+    edges = ctx.edges
+
     lines = cv2.HoughLinesP(
         edges,
         rho=1,
@@ -52,7 +61,7 @@ def detect_lines_standard_hough(
 # ==========================
 # DRAWING
 # ==========================
-def draw_lines_standard_hough(
+def draw(
     overlay,
     lines,
     color=(0, 255, 0),

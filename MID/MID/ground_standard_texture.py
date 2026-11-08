@@ -14,7 +14,7 @@ _initialized = False
 # ==========================
 # INITIALIZATION - STRUCTURE
 # ==========================
-def init_ground_standard_texture():
+def initialize():
     """
     Initializes the ground model structure and parameters.
     Texture learning must be done separately from a frame.
@@ -30,7 +30,7 @@ def init_ground_standard_texture():
 # ==========================
 # INITIALIZATION — PERCEPTION
 # ==========================
-def calibrate_ground_standard_texture(frame_bgr):
+def calibrate(ctx):
     """
     Learns ground color statistics from a single frame.
     """
@@ -38,6 +38,7 @@ def calibrate_ground_standard_texture(frame_bgr):
 
     print("[GroundModel] Learning ground texture...")
 
+    frame_bgr = ctx.frame
     h, w = frame_bgr.shape[:2]
 
     roi = frame_bgr[int(h * _GROUND_ROI_RATIO):h, :]
@@ -52,16 +53,17 @@ def calibrate_ground_standard_texture(frame_bgr):
 
     print("[GroundModel] Ground model ready")
 
-def is_ground_standard_texture_ready():
+def is_calibrated():
     return _initialized
 
 # ==========================
 # DETECTION — GROUND MASK
 # ==========================
-def detect_ground_mask_standard_texture(frame_bgr, std_factor=2.0):
+def detect(ctx, std_factor=2.0):
     """
     Detects ground pixels based on learned HSV statistics.
     """
+    frame_bgr = ctx.frame
 
     h, w = frame_bgr.shape[:2]
     mask_full = np.zeros((h, w), dtype=np.uint8)
@@ -88,7 +90,7 @@ def detect_ground_mask_standard_texture(frame_bgr, std_factor=2.0):
 # ==========================
 # GEOMETRY — GROUND LINE
 # ==========================
-def detect_ground_line_standard_texture(mask):
+def detect_line(mask):
     """
     Extracts the ground line as the median of the lowest
     detected ground pixel per column.
@@ -109,7 +111,7 @@ def detect_ground_line_standard_texture(mask):
 # ==========================
 # DRAWING
 # ==========================
-def draw_ground_mask_standard_texture(
+def draw(
     overlay,
     mask,
     color=(0, 255, 0),
@@ -131,7 +133,7 @@ def draw_ground_mask_standard_texture(
     )
 
 
-def draw_ground_line_standard_texture(
+def draw_line(
     overlay,
     y,
     color=(0, 255, 0),

@@ -5,7 +5,7 @@ import numpy as np
 # ==========================
 # INITIALIZATION
 # ==========================
-def init_ground_standard_geometry():
+def initialize():
     """
     Initializes the geometric ground model.
     Currently stores only configuration parameters.
@@ -14,6 +14,13 @@ def init_ground_standard_geometry():
     _GROUND_ROI_RATIO = 0.6
 
     print("[GroundGeometry] Model initialized")
+
+
+def calibrate(ctx=None):
+    """
+    Placeholder for interface consistency.
+    """
+    pass
 
 
 # ==========================
@@ -42,8 +49,8 @@ def _detect_hough_lines(
 # ==========================
 # DETECTION — Ground line
 # ==========================
-def detect_ground_standard_geometry(
-    edges,
+def detect(
+    ctx,
     roi_ratio=0.6,
     dy_thresh=15,
     min_dx_ratio=0.3,
@@ -56,6 +63,7 @@ def detect_ground_standard_geometry(
     - "best"   : longest + flattest line
     - "lowest" : lowest valid horizontal line
     """
+    edges = ctx.edges
     h_img, w_img = edges.shape
 
     # Bottom region of interest (ROI)
@@ -102,7 +110,7 @@ def detect_ground_standard_geometry(
 # ==========================
 # DRAWING
 # ==========================
-def draw_ground_standard_geometry(
+def draw(
     overlay,
     y,
     color=(255, 0, 0),

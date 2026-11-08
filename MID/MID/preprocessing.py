@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import cv2
 import numpy as np
 
@@ -21,4 +23,23 @@ def preprocess_frame(frame):
     edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel_h)
 
     return gray, edges
+
+
+@dataclass
+class FrameContext:
+    """
+    Images shared by all detectors for one frame.
+    Built once per frame so that every detect(ctx) has the same signature.
+    """
+    frame: np.ndarray  # raw BGR frame
+    gray: np.ndarray   # grayscale
+    edges: np.ndarray  # Canny + morphology
+
+
+def build_context(frame):
+    """
+    Runs the preprocessing once and returns the shared FrameContext.
+    """
+    gray, edges = preprocess_frame(frame)
+    return FrameContext(frame=frame, gray=gray, edges=edges)
 
