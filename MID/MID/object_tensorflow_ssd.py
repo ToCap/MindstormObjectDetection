@@ -8,7 +8,7 @@ import tensorflow_hub as hub
 # GLOBAL STATE
 # ==========================
 _MODEL = None
-_INITIALIZED = False
+_initialized = False
 
 
 # ==========================
@@ -33,27 +33,27 @@ LABELS = [
 
 
 # ==========================
-# INIT 1 — STRUCTURE
+# INITIALIZATION - STRUCTURE
 # ==========================
-def init_model():
+def init_object_tensorflow_ssd():
     """
     Loads the TensorFlow object detection model.
     Must be called once at startup.
     """
-    global _MODEL, _INITIALIZED
+    global _MODEL, _initialized 
 
-    if _INITIALIZED:
+    if _initialized:
         return
 
-    print("[ObjectModelTF] Loading object detection model...")
+    print("[ObjectModelTF] Loading object detection model")
     _MODEL = hub.load("https://tfhub.dev/tensorflow/ssd_mobilenet_v2/2")
-    _INITIALIZED = True
+    _initialized  = True
 
 
 # ==========================
-# INIT 2 — FROM FRAME (OPTIONAL)
+# INITIALIZATION — PERCEPTION
 # ==========================
-def init_model_from_frame(frame=None):
+def calibrate_object_tensorflow_ssd(frame=None):
     """
     Placeholder for interface consistency.
     TensorFlow model does not require frame-based init.
@@ -64,7 +64,7 @@ def init_model_from_frame(frame=None):
 # ==========================
 # PREDICTION
 # ==========================
-def predict_objects(frame_bgr):
+def detect_object_tensorflow_ssd(frame_bgr):
     """
     Runs TensorFlow object detection on a BGR frame.
 
@@ -73,9 +73,9 @@ def predict_objects(frame_bgr):
         scores  : [N]
         classes : [N]
     """
-    if not _INITIALIZED:
+    if not _initialized :
         raise RuntimeError(
-            "Object TF model not initialized. Call init_model() first."
+            "Object TF model not initialized. Call init_object_tensorflow_ssd() first."
         )
 
     img_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -94,7 +94,7 @@ def predict_objects(frame_bgr):
 # ==========================
 # RENDERING
 # ==========================
-def draw_object_boxes(
+def draw_object_tensorflow_ssd(
     overlay,
     boxes,
     scores,

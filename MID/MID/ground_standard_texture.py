@@ -8,12 +8,13 @@ import numpy as np
 _GROUND_MEAN = None
 _GROUND_STD = None
 _GROUND_ROI_RATIO = 0.6
+_initialized = False
 
 
 # ==========================
-# INITIALIZATION — STRUCTURE
+# INITIALIZATION - STRUCTURE
 # ==========================
-def init_ground_model_standard_texture():
+def init_ground_standard_texture():
     """
     Initializes the ground model structure and parameters.
     Texture learning must be done separately from a frame.
@@ -29,7 +30,7 @@ def init_ground_model_standard_texture():
 # ==========================
 # INITIALIZATION — PERCEPTION
 # ==========================
-def calibrate_ground_model_texture(frame_bgr):
+def calibrate_ground_standard_texture(frame_bgr):
     """
     Learns ground color statistics from a single frame.
     """
@@ -51,6 +52,8 @@ def calibrate_ground_model_texture(frame_bgr):
 
     print("[GroundModel] Ground model ready")
 
+def is_ground_standard_texture_ready():
+    return _initialized
 
 # ==========================
 # DETECTION — GROUND MASK
@@ -59,11 +62,6 @@ def detect_ground_mask_standard_texture(frame_bgr, std_factor=2.0):
     """
     Detects ground pixels based on learned HSV statistics.
     """
-    if not is_ground_model_initialized():
-        raise RuntimeError(
-            "Ground model not initialized from frame. "
-            "Call init_ground_model_from_frame() first."
-        )
 
     h, w = frame_bgr.shape[:2]
     mask_full = np.zeros((h, w), dtype=np.uint8)
@@ -133,7 +131,7 @@ def draw_ground_mask_standard_texture(
     )
 
 
-def detect_ground_line_standard_texture(
+def draw_ground_line_standard_texture(
     overlay,
     y,
     color=(0, 255, 0),

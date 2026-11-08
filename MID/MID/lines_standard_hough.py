@@ -5,7 +5,7 @@ import numpy as np
 # ==========================
 # INITIALIZATION
 # ==========================
-def init_geometry_model():
+def init_lines_standard_hough():
     """
     Initializes the geometry model.
     Currently empty but kept for architectural consistency.
@@ -16,7 +16,7 @@ def init_geometry_model():
 # ==========================
 # DETECTION
 # ==========================
-def detect_lines_hough(
+def detect_lines_standard_hough(
     edges,
     threshold=100,
     min_line_length=0,
@@ -52,7 +52,7 @@ def detect_lines_hough(
 # ==========================
 # DRAWING
 # ==========================
-def draw_lines_hough(
+def draw_lines_standard_hough(
     overlay,
     lines,
     color=(0, 255, 0),

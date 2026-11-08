@@ -5,7 +5,7 @@ import numpy as np
 # ==========================
 # INITIALIZATION
 # ==========================
-def init_circle_model_standard():
+def init_circle_standard_hough():
     """
     Initialize the circle detection model.
     Stateless placeholder.
@@ -13,7 +13,7 @@ def init_circle_model_standard():
     print("[CircleModel] init_model called (placeholder)")
 
 
-def calibrate_circle_model_standard(frame=None):
+def calibrate_circle_standard_hough(frame=None):
     """
     Optional initialization from a frame.
     """
@@ -23,7 +23,7 @@ def calibrate_circle_model_standard(frame=None):
 # ==========================
 # DETECTION — HOUGH CIRCLES
 # ==========================
-def detect_circle_standard(
+def detect_circle_standard_hough(
     gray,
     dp=1,
     min_dist=20,
@@ -52,7 +52,7 @@ def detect_circle_standard(
 # ==========================
 # DRAWING
 # ==========================
-def draw_circle_standard(
+def draw_circle_standard_hough(
     overlay,
     circles,
     color=(255, 0, 0)

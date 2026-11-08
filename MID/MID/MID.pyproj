@@ -22,10 +22,15 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="bbox_detection.py" />
-    <Compile Include="geometry_detection.py" />
-    <Compile Include="ground_detection.py" />
+    <Compile Include="bbox_standard_contour.py" />
+    <Compile Include="circle_standard_hough.py" />
+    <Compile Include="contour_standard_canny.py" />
+    <Compile Include="lines_standard_hough.py" />
+    <Compile Include="ground_standard_geometry.py" />
+    <Compile Include="ground_standard_texture.py" />
+    <Compile Include="ground_tensorflow_mobilenet.py" />
     <Compile Include="main.py" />
+    <Compile Include="object_tensorflow_ssd.py" />
     <Compile Include="preprocessing.py" />
     <Compile Include="test.py" />
   </ItemGroup>

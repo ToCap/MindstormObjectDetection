@@ -14,7 +14,7 @@ _GROUND_INPUT_SIZE = (224, 224)
 # ==========================
 # INITIALIZATION
 # ==========================
-def init_ground_model(input_size=(224, 224)):
+def init_ground_tensorflow_mobilenet():
     """
     Initializes the TensorFlow ground segmentation model.
     Must be called once before any detection.
@@ -26,10 +26,10 @@ def init_ground_model(input_size=(224, 224)):
 
     print("[TensorFlow] Initializing ground model...")
 
-    _GROUND_INPUT_SIZE = input_size
+    _GROUND_INPUT_SIZE = (224, 224)
 
     _GROUND_BACKBONE = tf.keras.applications.MobileNetV2(
-        input_shape=(input_size[0], input_size[1], 3),
+        input_shape=(_GROUND_INPUT_SIZE[0], _GROUND_INPUT_SIZE[1], 3),
         include_top=False,
         weights="imagenet"
     )
@@ -41,7 +41,7 @@ def init_ground_model(input_size=(224, 224)):
     ])
 
 
-def is_ground_model_initialized():
+def is_ground_tensorflow_mobilenet_initialized():
     """
     Returns True if the ground model is initialized.
     """
@@ -51,14 +51,14 @@ def is_ground_model_initialized():
 # ==========================
 # DETECTION — GROUND MASK
 # ==========================
-def detect_ground_mask(frame_bgr, threshold=0.5):
+def detect_ground_mask_tensorflow_mobilenet(frame_bgr, threshold=0.5):
     """
     Predicts a binary ground mask from a BGR frame.
     """
-    if not is_ground_model_initialized():
+    if not is_ground_tensorflow_mobilenet_initialized():
         raise RuntimeError(
             "Ground model not initialized. "
-            "Call init_ground_model() first."
+            "Call init_ground_tensorflow_mobilenet() first."
         )
 
     h, w = frame_bgr.shape[:2]
@@ -80,7 +80,7 @@ def detect_ground_mask(frame_bgr, threshold=0.5):
 # ==========================
 # GEOMETRY — GROUND LINE
 # ==========================
-def detect_ground_line(mask):
+def detect_ground_line_tensorflow_mobilenet(mask):
     """
     Extracts the ground line as the median of the lowest
     detected ground pixel per image column.
@@ -102,7 +102,7 @@ def detect_ground_line(mask):
 # ==========================
 # DRAWING
 # ==========================
-def draw_ground_mask(
+def draw_ground_mask_tensorflow_mobilenet(
     overlay,
     mask,
     color=(255, 0, 0),
@@ -124,7 +124,7 @@ def draw_ground_mask(
     )
 
 
-def draw_ground_line(
+def draw_ground_line_tensorflow_mobilenet(
     overlay,
     y,
     color=(255, 0, 0),
