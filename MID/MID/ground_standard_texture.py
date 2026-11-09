@@ -88,27 +88,6 @@ def detect(ctx, std_factor=2.0):
 
 
 # ==========================
-# GEOMETRY — GROUND LINE
-# ==========================
-def detect_line(mask):
-    """
-    Extracts the ground line as the median of the lowest
-    detected ground pixel per column.
-    """
-    ys = []
-
-    for x in range(mask.shape[1]):
-        col = np.where(mask[:, x] > 0)[0]
-        if len(col) > 0:
-            ys.append(col[-1])
-
-    if not ys:
-        return None
-
-    return int(np.median(ys))
-
-
-# ==========================
 # DRAWING
 # ==========================
 def draw(
@@ -131,19 +110,3 @@ def draw(
         0,
         overlay
     )
-
-
-def draw_line(
-    overlay,
-    y,
-    color=(0, 255, 0),
-    thickness=3
-):
-    """
-    Draws the detected ground line.
-    """
-    if y is None:
-        return
-
-    h, w = overlay.shape[:2]
-    cv2.line(overlay, (0, y), (w, y), color, thickness)
