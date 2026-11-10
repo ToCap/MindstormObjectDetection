@@ -23,7 +23,7 @@ import ground_standard_texture as ground_tex
 import map_standard_fusion as map_fusion
 
 # ==========================
-# OBJECT DETECTION — TENSORFLOW
+# OBJECT DETECTION ï¿½ TENSORFLOW
 # ==========================
 #import object_tensorflow_ssd as object_tf
 #import ground_tensorflow_mobilenet as ground_tf
@@ -38,6 +38,12 @@ VIEWS = [
     [[ground_tex], [ground_geom]],   # top    : HSV texture | Hough geometry
     [[map_fusion], []],              # bottom : 2D occupancy grid | AI results
 ]
+
+# Modules whose calibration is NOT started automatically on the first frame
+# (interactive calibration disabled for now: the code is kept, remove the
+# module from this list to enable it again). A saved calibration file is
+# still loaded by the module at initialization.
+NO_AUTO_CALIBRATION = [map_fusion]
 
 # ==========================
 # INITIALIZATION
@@ -66,6 +72,7 @@ def render_view(detectors, ctx):
     for module in detectors:
         # auto-calibration (modules without is_calibrated are skipped)
         if (hasattr(module, "is_calibrated") and not module.is_calibrated()
+                and module not in NO_AUTO_CALIBRATION
                 and module not in _calibration_tried):
             _calibration_tried.add(module)
             module.calibrate(ctx)
