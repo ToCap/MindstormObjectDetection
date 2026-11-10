@@ -30,6 +30,7 @@
     <Compile Include="ground_standard_texture.py" />
     <Compile Include="ground_tensorflow_mobilenet.py" />
     <Compile Include="main.py" />
+    <Compile Include="map_standard_fusion.py" />
     <Compile Include="object_tensorflow_ssd.py" />
     <Compile Include="preprocessing.py" />
     <Compile Include="test.py" />
