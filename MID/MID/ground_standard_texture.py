@@ -5,13 +5,20 @@ import numpy as np
 # ==========================
 # GLOBAL MODEL STATE
 # ==========================
-_GROUND_MEAN = None
-_GROUND_STD = None
+_GROUND_MODELS = []   # list of (mean, std) in HSV, one per ground texture
 _GROUND_ROI_RATIO = 0.6
 _initialized = False
 
-# Learning area: centre of the bottom strip (fraction of the image width)
-_SAMPLE_WIDTH_RATIO = 0.4
+# Learning area: bottom strip, centred (fraction of the image width)
+_SAMPLE_WIDTH_RATIO = 1.0
+
+# The sample is split in 2 clusters (2 ground textures, e.g. floor + rug);
+# a cluster smaller than this share of the sample is ignored
+_N_TEXTURES = 2
+_MIN_CLUSTER_RATIO = 0.1
+
+# Feature weights (H, S, V) used for the clustering only
+_CLUSTER_WEIGHTS = np.array([2.0, 1.0, 0.5], dtype=np.float32)
 
 # Minimum standard deviation per channel (H, S, V): avoids a window that is
 # too narrow on a uniform floor
@@ -38,13 +45,13 @@ def initialize():
 
 
 # ==========================
-# INITIALIZATION — PERCEPTION
+# INITIALIZATION ï¿½ PERCEPTION
 # ==========================
 def calibrate(ctx):
     """
     Learns ground color statistics from a single frame.
     """
-    global _GROUND_MEAN, _GROUND_STD
+    global _GROUND_MODELS
 
     print("[GroundModel] Learning ground texture...")
 
@@ -55,22 +62,47 @@ def calibrate(ctx):
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
     # Sample bottom part of ROI to avoid obstacles
-    # and use the centre only (tapis / meubles on the sides are ignored)
+    # (centred area, see _SAMPLE_WIDTH_RATIO)
     x0 = int(w * (1.0 - _SAMPLE_WIDTH_RATIO) / 2.0)
     x1 = w - x0
     sample = hsv[int(roi.shape[0] * 0.7):, x0:x1]
     pixels = sample.reshape(-1, 3)
 
-    _GROUND_MEAN = np.mean(pixels, axis=0)
-    _GROUND_STD = np.maximum(np.std(pixels, axis=0), _MIN_STD)
+    # split the sample in textures (k-means on weighted HSV)
+    data = np.ascontiguousarray(pixels, dtype=np.float32)
+    models = []
 
-    print("[GroundModel] Ground model ready")
+    if len(data) >= _N_TEXTURES:
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0)
+        _, labels, _ = cv2.kmeans(
+            data * _CLUSTER_WEIGHTS, _N_TEXTURES, None, criteria, 3,
+            cv2.KMEANS_PP_CENTERS
+        )
+        labels = labels.ravel()
+
+        for k in range(_N_TEXTURES):
+            cluster = data[labels == k]
+            if len(cluster) >= _MIN_CLUSTER_RATIO * len(data):
+                models.append((
+                    np.mean(cluster, axis=0),
+                    np.maximum(np.std(cluster, axis=0), _MIN_STD),
+                ))
+
+    if not models:
+        models.append((
+            np.mean(data, axis=0),
+            np.maximum(np.std(data, axis=0), _MIN_STD),
+        ))
+
+    _GROUND_MODELS = models
+
+    print("[GroundModel] Ground model ready (%d texture(s))" % len(models))
 
 def is_calibrated():
     return _initialized
 
 # ==========================
-# DETECTION — GROUND MASK
+# DETECTION ï¿½ GROUND MASK
 # ==========================
 def detect(ctx, std_factor=2.0):
     """
@@ -85,13 +117,11 @@ def detect(ctx, std_factor=2.0):
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
     factor = std_factor * np.array([1.0, 1.0, _V_TOLERANCE_FACTOR])
-    lower = _GROUND_MEAN - factor * _GROUND_STD
-    upper = _GROUND_MEAN + factor * _GROUND_STD
-
-    lower = np.clip(lower, 0, 255).astype(np.uint8)
-    upper = np.clip(upper, 0, 255).astype(np.uint8)
-
-    mask = cv2.inRange(hsv, lower, upper)
+    mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+    for mean, std in _GROUND_MODELS:
+        lower = np.clip(mean - factor * std, 0, 255).astype(np.uint8)
+        upper = np.clip(mean + factor * std, 0, 255).astype(np.uint8)
+        mask |= cv2.inRange(hsv, lower, upper)
 
     kernel = np.ones((5, 5), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
