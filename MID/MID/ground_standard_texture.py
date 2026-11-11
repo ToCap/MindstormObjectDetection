@@ -19,10 +19,9 @@ def initialize():
     Initializes the ground model structure and parameters.
     Texture learning must be done separately from a frame.
     """
-    global _GROUND_ROI_RATIO, _initialized
+    global _GROUND_ROI_RATIO
 
     _GROUND_ROI_RATIO = 0.6
-    _initialized = False
 
     print("[GroundModel] Structure initialized")
 
@@ -35,7 +34,7 @@ def calibrate(ctx):
     """
     Learns ground color statistics from a single frame.
     """
-    global _GROUND_MEAN, _GROUND_STD, _initialized
+    global _GROUND_MEAN, _GROUND_STD
 
     print("[GroundModel] Learning ground texture...")
 
@@ -51,8 +50,6 @@ def calibrate(ctx):
 
     _GROUND_MEAN = np.mean(pixels, axis=0)
     _GROUND_STD = np.std(pixels, axis=0) + 1e-6
-
-    _initialized = True
 
     print("[GroundModel] Ground model ready")
 
