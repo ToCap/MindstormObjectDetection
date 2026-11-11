@@ -10,6 +10,16 @@ _GROUND_STD = None
 _GROUND_ROI_RATIO = 0.6
 _initialized = False
 
+# Learning area: centre of the bottom strip (fraction of the image width)
+_SAMPLE_WIDTH_RATIO = 0.4
+
+# Minimum standard deviation per channel (H, S, V): avoids a window that is
+# too narrow on a uniform floor
+_MIN_STD = np.array([5.0, 20.0, 30.0])
+
+# V (brightness) tolerance multiplier: lighting varies more than colour
+_V_TOLERANCE_FACTOR = 2.0
+
 
 # ==========================
 # INITIALIZATION - STRUCTURE
@@ -45,11 +55,14 @@ def calibrate(ctx):
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
     # Sample bottom part of ROI to avoid obstacles
-    sample = hsv[int(roi.shape[0] * 0.7):, :]
+    # and use the centre only (tapis / meubles on the sides are ignored)
+    x0 = int(w * (1.0 - _SAMPLE_WIDTH_RATIO) / 2.0)
+    x1 = w - x0
+    sample = hsv[int(roi.shape[0] * 0.7):, x0:x1]
     pixels = sample.reshape(-1, 3)
 
     _GROUND_MEAN = np.mean(pixels, axis=0)
-    _GROUND_STD = np.std(pixels, axis=0) + 1e-6
+    _GROUND_STD = np.maximum(np.std(pixels, axis=0), _MIN_STD)
 
     print("[GroundModel] Ground model ready")
 
@@ -71,8 +84,9 @@ def detect(ctx, std_factor=2.0):
     roi = frame_bgr[int(h * _GROUND_ROI_RATIO):h, :]
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
-    lower = _GROUND_MEAN - std_factor * _GROUND_STD
-    upper = _GROUND_MEAN + std_factor * _GROUND_STD
+    factor = std_factor * np.array([1.0, 1.0, _V_TOLERANCE_FACTOR])
+    lower = _GROUND_MEAN - factor * _GROUND_STD
+    upper = _GROUND_MEAN + factor * _GROUND_STD
 
     lower = np.clip(lower, 0, 255).astype(np.uint8)
     upper = np.clip(upper, 0, 255).astype(np.uint8)
@@ -82,6 +96,11 @@ def detect(ctx, std_factor=2.0):
     kernel = np.ones((5, 5), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    # keep only the regions connected to the bottom of the image
+    _, labels = cv2.connectedComponents(mask)
+    bottom = np.unique(labels[-1, :])
+    mask = np.where(np.isin(labels, bottom[bottom > 0]), 255, 0).astype(np.uint8)
 
     mask_full[int(h * _GROUND_ROI_RATIO):h, :] = mask
     return mask_full
