@@ -13,6 +13,15 @@ import ground_standard_texture as ground_tex
 # ==========================
 # CONFIGURATION
 # ==========================
+# MAP_MODE selects the geometry of the grid:
+#  - "PIXEL": cells are blocks of CELL_SIZE_PX x CELL_SIZE_PX pixels of the
+#    camera image (no calibration needed, no distances in meters)
+#  - "METRIC": cells are CELL_SIZE_M squares on the ground around the robot
+#    (needs the pixel-to-meter calibration)
+MAP_MODE = "PIXEL"
+CELL_SIZE_PX = 16           # PIXEL mode: side of one cell, in pixels
+GROUND_COVERAGE = 0.5       # PIXEL mode: share of ground pixels for a ground cell
+
 GRID_WIDTH_M = 4.0          # grid width, in meters
 GRID_DEPTH_M = 4.0          # grid depth in front of the robot, in meters
 CELL_SIZE_M = 0.05          # side of one cell, in meters
@@ -26,6 +35,21 @@ CALIB_FILE = "map_calibration.json"
 
 DRAW_GRID_STEP_M = 0.5      # spacing of the ticks and of the control grid
 
+# Sources fused into the grid, as (module, keyword arguments of detect).
+# Another model is added by appending it to the right list.
+#  - ground source: detect(ctx) -> uint8 image of the frame size, 0 = no
+#    information, 1 = reference ground surface, >= 2 = ground of another
+#    surface (both are free, no obstacle); calibrate(ctx) / is_calibrated()
+#    are used if the module has them
+#  - obstacle source: detect(ctx) -> list of (x1, y1, x2, y2) boxes whose
+#    bottom edge touches the ground
+GROUND_SOURCES = [(ground_tex, {})]
+OBSTACLE_SOURCES = [(bbox_contour, {"scale": BBOX_SCALE})]
+
+
+# interactive calibration: main.py asks for it only once, not at every frame
+CALIBRATION_ASKED_ONCE = True
+
 
 # ==========================
 # TYPES AND ERROR CODES
@@ -34,6 +58,7 @@ class CellState(IntEnum):
     UNKNOWN = 0
     FREE = 1
     OBSTACLE = 2
+    FREE_OTHER_SURFACE = 3   # free, but another surface than the reference
 
 
 MAP_E_NOT_INITIALIZED = 0x01
@@ -41,6 +66,7 @@ MAP_E_NOT_CALIBRATED = 0x02
 MAP_E_CALIB_ABORTED = 0x03
 MAP_E_CALIB_FILE = 0x04
 MAP_E_BAD_FRAME = 0x05
+MAP_E_WRONG_MODE = 0x06
 
 _ERROR_NAMES = {
     MAP_E_NOT_INITIALIZED: "MAP_E_NOT_INITIALIZED",
@@ -48,6 +74,7 @@ _ERROR_NAMES = {
     MAP_E_CALIB_ABORTED: "MAP_E_CALIB_ABORTED",
     MAP_E_CALIB_FILE: "MAP_E_CALIB_FILE",
     MAP_E_BAD_FRAME: "MAP_E_BAD_FRAME",
+    MAP_E_WRONG_MODE: "MAP_E_WRONG_MODE",
 }
 
 
@@ -198,32 +225,46 @@ def _save_calibration():
 # ==========================
 def initialize():
     """
-    Initializes ground_tex and bbox_contour, computes the grid size and
-    reloads the calibration file if it exists.
+    Initializes the sources and, in METRIC mode, computes the grid size and
+    reloads the calibration file if it exists (in PIXEL mode the grid size
+    follows the frame size).
     Must be called once before any other function.
     """
     global _initialized, _N_ROWS, _N_COLS, _WARNED_NOT_CALIBRATED
 
-    ground_tex.initialize()
-    bbox_contour.initialize()
+    if MAP_MODE not in ("PIXEL", "METRIC"):
+        raise ValueError("[MapFusion] unknown MAP_MODE %r" % (MAP_MODE,))
 
-    _N_COLS = int(round(GRID_WIDTH_M / CELL_SIZE_M))
-    _N_ROWS = int(round(GRID_DEPTH_M / CELL_SIZE_M))
+    for module, _ in GROUND_SOURCES + OBSTACLE_SOURCES:
+        module.initialize()
+
     _WARNED_NOT_CALIBRATED = False
-
     _clear_calibration()
-    _load_calibration()
+
+    if MAP_MODE == "METRIC":
+        _N_COLS = int(round(GRID_WIDTH_M / CELL_SIZE_M))
+        _N_ROWS = int(round(GRID_DEPTH_M / CELL_SIZE_M))
+        _load_calibration()
+        print("[MapFusion] Initialized, METRIC mode (%d x %d cells)"
+              % (_N_ROWS, _N_COLS))
+    else:
+        _N_COLS = 0
+        _N_ROWS = 0
+        print("[MapFusion] Initialized, PIXEL mode (%d px cells)"
+              % CELL_SIZE_PX)
 
     _initialized = True
-    print("[MapFusion] Initialized (%d x %d cells)" % (_N_ROWS, _N_COLS))
 
 
 # ==========================
 # PIXEL <-> METER EQUIVALENCE
 # ==========================
 def is_calibrated():
-    """True if the pixel-to-meter homography is available."""
-    return _H is not None
+    """
+    True if the map can be built: always in PIXEL mode (nothing to
+    calibrate), in METRIC mode once the homography is available.
+    """
+    return MAP_MODE == "PIXEL" or _H is not None
 
 
 def pixel_to_ground(u, v):
@@ -409,6 +450,10 @@ def calibrate(ctx=None):
     """
     _require_initialized()
 
+    if MAP_MODE != "METRIC":
+        _report(MAP_E_WRONG_MODE, "calibrate() is only available in METRIC mode")
+        return False
+
     if ctx is not None:
         frame = ctx.frame.copy()
     else:
@@ -489,55 +534,127 @@ def _warn_not_calibrated():
         _WARNED_NOT_CALIBRATED = True
 
 
+def _merge_surface(surface, cls):
+    """Merges a surface map: the reference surface (1) wins over 2."""
+    return np.where(
+        cls > 0, np.where(surface > 0, np.minimum(surface, cls), cls), surface
+    ).astype(np.uint8)
+
+
+def _mask_to_cells_pixel(mask):
+    """
+    PIXEL mode: surface of every cell from a ground mask of the image size
+    (0 = none, 1 = reference, 2 = other). A cell is ground if at least
+    GROUND_COVERAGE of its pixels are, with the majority surface.
+    """
+    s = CELL_SIZE_PX
+    h, w = mask.shape[:2]
+    cls = np.minimum(mask, 2)
+
+    share = []
+    for k in (1, 2):
+        part = cv2.copyMakeBorder(
+            (cls == k).astype(np.float32), 0, _N_ROWS * s - h,
+            0, _N_COLS * s - w, cv2.BORDER_REPLICATE
+        )
+        share.append(cv2.resize(part, (_N_COLS, _N_ROWS),
+                                interpolation=cv2.INTER_AREA))
+
+    covered = (share[0] + share[1]) >= GROUND_COVERAGE
+    cells = np.where(share[0] >= share[1], 1, 2).astype(np.uint8)
+    cells[~covered] = 0
+    return cells
+
+
+def _project_box_pixel(box, obstacle, shadow):
+    """
+    PIXEL mode: the bottom edge of the box gives the obstacle cells, and
+    the cells above it (behind it in the image) are the shadow.
+    """
+    s = CELL_SIZE_PX
+    x1, y1, x2, y2 = box
+
+    # a box entirely outside the grid is ignored
+    if x2 < 0 or y2 < 0 or x1 >= _N_COLS * s:
+        return
+
+    c1 = int(np.clip(x1 // s, 0, _N_COLS - 1))
+    c2 = int(np.clip(x2 // s, 0, _N_COLS - 1))
+    row = int(np.clip(y2 // s, 0, _N_ROWS - 1))
+    m = OBSTACLE_MARGIN_CELLS
+
+    obstacle[max(row - m, 0):min(row + m, _N_ROWS - 1) + 1,
+             max(c1 - m, 0):min(c2 + m, _N_COLS - 1) + 1] = 1
+    shadow[:max(row - m, 0), c1:c2 + 1] = 1
+
+
 def detect(ctx):
     """
-    Builds the local occupancy grid of the current frame.
+    Builds the occupancy grid of the current frame.
     Priority per cell: OBSTACLE > hidden behind an obstacle (UNKNOWN)
-    > FREE (ground texture) > UNKNOWN.
+    > FREE / FREE_OTHER_SURFACE (ground) > UNKNOWN.
     """
+    global _N_ROWS, _N_COLS
+
     _require_initialized()
 
     frame = ctx.frame
     _check_frame(frame)
+    h_img, w_img = frame.shape[:2]
+
+    if MAP_MODE == "PIXEL":
+        _N_COLS = -(-w_img // CELL_SIZE_PX)
+        _N_ROWS = -(-h_img // CELL_SIZE_PX)
+        project_box = _project_box_pixel
+    else:
+        project_box = _project_box
 
     grid = np.full((_N_ROWS, _N_COLS), int(CellState.UNKNOWN), dtype=np.uint8)
 
-    if _H is None:
-        _warn_not_calibrated()
-        return grid
-
-    h_img, w_img = frame.shape[:2]
-    if (w_img, h_img) != _IMAGE_SIZE:
-        if _FROM_FILE:
-            _report(MAP_E_CALIB_FILE, "%s was made for %dx%d images, ignored"
-                    % (CALIB_FILE, _IMAGE_SIZE[0], _IMAGE_SIZE[1]))
-            _clear_calibration()
+    if MAP_MODE == "METRIC":
+        if _H is None:
+            _warn_not_calibrated()
             return grid
-        raise ValueError(
-            "[MapFusion] %s (0x%02X): frame is %dx%d, calibration is %dx%d"
-            % (_ERROR_NAMES[MAP_E_BAD_FRAME], MAP_E_BAD_FRAME, w_img, h_img,
-               _IMAGE_SIZE[0], _IMAGE_SIZE[1])
-        )
 
-    if not ground_tex.is_calibrated():
-        ground_tex.calibrate(ctx)
+        if (w_img, h_img) != _IMAGE_SIZE:
+            if _FROM_FILE:
+                _report(MAP_E_CALIB_FILE,
+                        "%s was made for %dx%d images, ignored"
+                        % (CALIB_FILE, _IMAGE_SIZE[0], _IMAGE_SIZE[1]))
+                _clear_calibration()
+                return grid
+            raise ValueError(
+                "[MapFusion] %s (0x%02X): frame is %dx%d, calibration is %dx%d"
+                % (_ERROR_NAMES[MAP_E_BAD_FRAME], MAP_E_BAD_FRAME,
+                   w_img, h_img, _IMAGE_SIZE[0], _IMAGE_SIZE[1])
+            )
 
-    ground_mask = ground_tex.detect(ctx)
-    boxes = bbox_contour.detect(ctx, scale=BBOX_SCALE)
+    # ground sources: reference surface (1) wins over another surface (2)
+    surface = np.zeros((_N_ROWS, _N_COLS), dtype=np.uint8)
+    for module, kwargs in GROUND_SOURCES:
+        if hasattr(module, "is_calibrated") and not module.is_calibrated():
+            module.calibrate(ctx)
 
-    # FREE candidates: ground mask seen from above
-    free = cv2.warpPerspective(
-        ground_mask, _H_GRID, (_N_COLS, _N_ROWS),
-        flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT,
-        borderValue=0
-    )
+        mask = module.detect(ctx, **kwargs)
+        if MAP_MODE == "PIXEL":
+            cls = _mask_to_cells_pixel(mask)
+        else:
+            cls = np.minimum(cv2.warpPerspective(
+                mask, _H_GRID, (_N_COLS, _N_ROWS),
+                flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0
+            ), 2)
+        surface = _merge_surface(surface, cls)
 
+    # obstacle sources: contact segment and shadow of every box
     obstacle = np.zeros((_N_ROWS, _N_COLS), dtype=np.uint8)
     shadow = np.zeros((_N_ROWS, _N_COLS), dtype=np.uint8)
-    for box in boxes:
-        _project_box(box, obstacle, shadow)
+    for module, kwargs in OBSTACLE_SOURCES:
+        for box in module.detect(ctx, **kwargs):
+            project_box(box, obstacle, shadow)
 
-    grid[free > 0] = CellState.FREE
+    grid[surface == 1] = CellState.FREE
+    grid[surface == 2] = CellState.FREE_OTHER_SURFACE
     grid[shadow > 0] = CellState.UNKNOWN
     grid[obstacle > 0] = CellState.OBSTACLE
 
@@ -551,6 +668,7 @@ _PALETTE = np.array([
     (128, 128, 128),   # UNKNOWN: gray
     (0, 200, 0),       # FREE: green
     (0, 0, 255),       # OBSTACLE: red
+    (200, 200, 0),     # FREE_OTHER_SURFACE: cyan
 ], dtype=np.uint8)
 
 
@@ -576,21 +694,25 @@ def draw(overlay, grid):
         _PALETTE[grid], (w_grid, h_grid), interpolation=cv2.INTER_NEAREST
     )
 
-    px_per_m = w_grid / GRID_WIDTH_M
-    tick = (210, 210, 210)
+    # METRIC mode: ticks every DRAW_GRID_STEP_M (distance and lateral lines);
+    # in PIXEL mode there is no distance to show
+    if MAP_MODE == "METRIC":
+        px_per_m = w_grid / GRID_WIDTH_M
+        tick = (210, 210, 210)
 
-    # ticks every DRAW_GRID_STEP_M: distance lines and lateral lines
-    for y in np.arange(DRAW_GRID_STEP_M, GRID_DEPTH_M + 1e-9, DRAW_GRID_STEP_M):
-        yy = y0 + h_grid - int(round(y * px_per_m))
-        cv2.line(canvas, (x0, yy), (x0 + w_grid - 1, yy), tick, 1)
-        cv2.putText(canvas, "%.1f m" % y, (x0 + 3, yy - 3),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1,
-                    cv2.LINE_AA)
+        for y in np.arange(DRAW_GRID_STEP_M, GRID_DEPTH_M + 1e-9,
+                           DRAW_GRID_STEP_M):
+            yy = y0 + h_grid - int(round(y * px_per_m))
+            cv2.line(canvas, (x0, yy), (x0 + w_grid - 1, yy), tick, 1)
+            cv2.putText(canvas, "%.1f m" % y, (x0 + 3, yy - 3),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1,
+                        cv2.LINE_AA)
 
-    half = GRID_WIDTH_M / 2.0
-    for x in np.arange(-half + DRAW_GRID_STEP_M, half - 1e-9, DRAW_GRID_STEP_M):
-        xx = x0 + int(round((x + half) * px_per_m))
-        cv2.line(canvas, (xx, y0), (xx, y0 + h_grid - 1), tick, 1)
+        half = GRID_WIDTH_M / 2.0
+        for x in np.arange(-half + DRAW_GRID_STEP_M, half - 1e-9,
+                           DRAW_GRID_STEP_M):
+            xx = x0 + int(round((x + half) * px_per_m))
+            cv2.line(canvas, (xx, y0), (xx, y0 + h_grid - 1), tick, 1)
 
     # robot: bottom centre
     cx = x0 + w_grid // 2
