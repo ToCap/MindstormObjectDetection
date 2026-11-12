@@ -17,15 +17,28 @@ _SAMPLE_WIDTH_RATIO = 1.0
 _N_TEXTURES = 2
 _MIN_CLUSTER_RATIO = 0.1
 
+# Two clusters whose centres are closer than this (in units of standard
+# deviation, windows overlapping) are one texture: they are merged
+_MERGE_DISTANCE = 2.0
+
 # Feature weights (H, S, V) used for the clustering only
 _CLUSTER_WEIGHTS = np.array([2.0, 1.0, 0.5], dtype=np.float32)
 
 # Minimum standard deviation per channel (H, S, V): avoids a window that is
 # too narrow on a uniform floor
-_MIN_STD = np.array([5.0, 20.0, 30.0])
+_MIN_STD = np.array([5.0, 15.0, 15.0])
 
 # V (brightness) tolerance multiplier: lighting varies more than colour
-_V_TOLERANCE_FACTOR = 2.0
+_V_TOLERANCE_FACTOR = 1.5
+
+# Cleaning of the mask
+_OPEN_KERNEL_SIZE = 9      # removes thin objects (legs) and isolated spots
+_EDGE_DILATE_SIZE = 3      # thickness of the contours cut out of the mask
+_EDGE_BLUR_SIZE = 9        # smoothing before Canny (ignores fine textures)
+_EDGE_MIN_LENGTH = 25      # only horizontal contours at least this long (px)
+
+# Colours (BGR) used by draw() for texture 1, 2, ...
+_DRAW_COLORS = [(0, 255, 0), (255, 255, 0)]
 
 
 # ==========================
@@ -88,6 +101,13 @@ def calibrate(ctx):
                     np.maximum(np.std(cluster, axis=0), _MIN_STD),
                 ))
 
+    # one texture seen as two clusters: merge them
+    if len(models) == 2:
+        (m1, s1), (m2, s2) = models
+        scale = np.maximum(s1, s2) * np.array([1.0, 1.0, _V_TOLERANCE_FACTOR])
+        if np.max(np.abs(m1 - m2) / scale) < _MERGE_DISTANCE:
+            models = []
+
     if not models:
         models.append((
             np.mean(data, axis=0),
@@ -107,32 +127,55 @@ def is_calibrated():
 def detect(ctx, std_factor=2.0):
     """
     Detects ground pixels based on learned HSV statistics.
+    Returns a uint8 image of the frame size: 0 = not ground,
+    1, 2, ... = index (from 1) of the ground texture of the pixel.
     """
     frame_bgr = ctx.frame
 
     h, w = frame_bgr.shape[:2]
     mask_full = np.zeros((h, w), dtype=np.uint8)
+    y0 = int(h * _GROUND_ROI_RATIO)
 
-    roi = frame_bgr[int(h * _GROUND_ROI_RATIO):h, :]
+    roi = frame_bgr[y0:h, :]
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    hsv_f = hsv.astype(np.float32)
 
+    # one window per texture; a pixel takes the closest texture
     factor = std_factor * np.array([1.0, 1.0, _V_TOLERANCE_FACTOR])
-    mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
-    for mean, std in _GROUND_MODELS:
-        lower = np.clip(mean - factor * std, 0, 255).astype(np.uint8)
-        upper = np.clip(mean + factor * std, 0, 255).astype(np.uint8)
-        mask |= cv2.inRange(hsv, lower, upper)
+    best = np.full(hsv.shape[:2], np.inf, dtype=np.float32)
+    texture = np.zeros(hsv.shape[:2], dtype=np.uint8)
+    for k, (mean, std) in enumerate(_GROUND_MODELS):
+        dist = np.max(np.abs(hsv_f - mean) / (factor * std), axis=2)
+        closer = (dist <= 1.0) & (dist < best)
+        best[closer] = dist[closer]
+        texture[closer] = k + 1
 
+    mask = np.where(texture > 0, 255, 0).astype(np.uint8)
+
+    # fill small holes, then cut the contours (base of the furniture)
     kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    # long horizontal contours only (base of furniture): fine textures
+    # such as a rug are smoothed out and short edges are dropped
+    gray = cv2.GaussianBlur(ctx.gray[y0:h, :], (_EDGE_BLUR_SIZE,) * 2, 0)
+    edges = cv2.Canny(gray, 20, 60)
+    edges = cv2.morphologyEx(
+        edges, cv2.MORPH_OPEN, np.ones((1, _EDGE_MIN_LENGTH), np.uint8)
+    )
+    edges = cv2.dilate(edges, np.ones((_EDGE_DILATE_SIZE,) * 2, np.uint8))
+    mask[edges > 0] = 0
+
+    # remove thin objects and isolated spots
+    kernel = np.ones((_OPEN_KERNEL_SIZE,) * 2, np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
 
     # keep only the regions connected to the bottom of the image
     _, labels = cv2.connectedComponents(mask)
     bottom = np.unique(labels[-1, :])
-    mask = np.where(np.isin(labels, bottom[bottom > 0]), 255, 0).astype(np.uint8)
+    keep = np.isin(labels, bottom[bottom > 0])
 
-    mask_full[int(h * _GROUND_ROI_RATIO):h, :] = mask
+    mask_full[y0:h, :] = np.where(keep, texture, 0)
     return mask_full
 
 
@@ -142,14 +185,16 @@ def detect(ctx, std_factor=2.0):
 def draw(
     overlay,
     mask,
-    color=(0, 255, 0),
+    colors=None,
     alpha=0.4
 ):
     """
-    Draws the ground mask on the overlay.
+    Draws the ground mask on the overlay, one colour per texture.
     """
+    colors = colors or _DRAW_COLORS
     color_layer = np.zeros_like(overlay)
-    color_layer[mask > 0] = color
+    for k in range(1, int(mask.max()) + 1):
+        color_layer[mask == k] = colors[(k - 1) % len(colors)]
 
     cv2.addWeighted(
         color_layer,

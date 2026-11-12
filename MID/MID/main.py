@@ -16,6 +16,7 @@ import lines_standard_hough as lines
 # ==========================
 import ground_standard_geometry as ground_geom
 import ground_standard_texture as ground_tex
+import bbox_standard_contour as bbox_contour
 
 # ==========================
 # MAP MODELS
@@ -35,7 +36,7 @@ import map_standard_fusion as map_fusion
 # displayed as a grid: one list per row, one list of detectors per view.
 # An empty list is a placeholder view (black).
 VIEWS = [
-    [[ground_tex], [ground_geom]],   # top    : HSV texture | Hough geometry
+    [[ground_tex], [bbox_contour]],   # top    : HSV texture | bbox
     [[map_fusion], []],              # bottom : 2D occupancy grid | AI results
 ]
 
@@ -55,8 +56,10 @@ for module in dict.fromkeys(m for row in VIEWS for view in row for m in view):
 # ==========================
 # VIEWS
 # ==========================
-# modules whose calibration was already attempted (a cancelled
-# calibration is not requested again at every frame)
+# interactive modules (flag CALIBRATION_ASKED_ONCE) whose calibration was
+# already attempted: a cancelled calibration is not requested again at every
+# frame. The other modules are recalibrated at every frame while
+# is_calibrated() is False (e.g. ground_tex relearns the floor each frame).
 _calibration_tried = set()
 
 
@@ -74,7 +77,8 @@ def render_view(detectors, ctx):
         if (hasattr(module, "is_calibrated") and not module.is_calibrated()
                 and module not in NO_AUTO_CALIBRATION
                 and module not in _calibration_tried):
-            _calibration_tried.add(module)
+            if getattr(module, "CALIBRATION_ASKED_ONCE", False):
+                _calibration_tried.add(module)
             module.calibrate(ctx)
 
         module.draw(overlay, module.detect(ctx))
