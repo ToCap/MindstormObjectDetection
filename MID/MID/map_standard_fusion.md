@@ -27,7 +27,7 @@ The map is only valid if the following assumptions hold; otherwise it is wrong a
 | A1 | The ground is flat between the robot and the far edge of the grid. |
 | A2 | The camera is fixed relative to the robot: its height and tilt have not changed since the calibration. |
 | A3 | There is a single camera and no depth measurement. The map is local and recomputed on every frame, without robot pose (apart from the debounce of 5.3, which only smooths detections over a few frames). In PIXEL mode, what is hidden behind an obstacle is assumed to be the part of the image above its bottom edge. |
-| A4 | A ground source returns a mask of the image size: 0 = no information, 1 = reference surface, ≥ 2 = another surface. `ground_tex` only covers the lower part of the image (ROI from 40 % to 100 % of the height by default, set for a camera close to the floor); elsewhere it is 0. |
+| A4 | A ground source returns a mask of the image size: 0 = no information, 1 = reference surface, ≥ 2 = another surface. `ground_tex` only covers the lower part of the image (ROI from 40 % to 100 % of the height for a camera 12 cm above the floor, up to 60 % at 60 cm: the start of the ROI follows the parameter `CAMERA_HEIGHT_M` of `ground_tex`); elsewhere it is 0. |
 | A5 | `bbox_contour` returns pixel rectangles `(x1, y1, x2, y2)`. The map requests them without enlargement (`scale = 1.0`), so the bottom edge of a box is the contact with the ground. |
 | A6 | Python with OpenCV and NumPy only; no TensorFlow in this module. |
 

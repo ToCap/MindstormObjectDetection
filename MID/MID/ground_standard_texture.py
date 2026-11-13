@@ -8,12 +8,15 @@ import numpy as np
 _GROUND_MODELS = []   # list of (mean, std) in HSV, one per ground texture
 _initialized = False
 
-# Analysed area: from this fraction of the image height down to the bottom.
-# It depends on the camera: a camera close to the floor (12 cm) sees the floor
-# up to about 40 % of the height; the region growing below keeps the mask
-# from spreading over the furniture
-_DEFAULT_ROI_RATIO = 0.4
-_GROUND_ROI_RATIO = _DEFAULT_ROI_RATIO
+# Height of the camera above the floor, in meters
+CAMERA_HEIGHT_M = 0.12
+
+# Analysed area: from a fraction of the image height down to the bottom. The
+# higher the camera, the lower the floor ends in the image, so the fraction
+# grows with the camera height. Points (height in m, fraction), measured on
+# captures; linear in between, constant outside
+_ROI_BY_HEIGHT = ((0.12, 0.40), (0.60, 0.60))
+_GROUND_ROI_RATIO = 0.4
 
 # Learning area: bottom of the image (fraction of the image height)
 _SAMPLE_BOTTOM_RATIO = 0.12
@@ -65,9 +68,12 @@ def initialize():
     """
     global _GROUND_ROI_RATIO
 
-    _GROUND_ROI_RATIO = _DEFAULT_ROI_RATIO
+    heights, ratios = zip(*_ROI_BY_HEIGHT)
+    _GROUND_ROI_RATIO = float(np.interp(CAMERA_HEIGHT_M, heights, ratios))
 
-    print("[GroundModel] Structure initialized")
+    print("[GroundModel] Structure initialized (camera at %.2f m, analysed "
+          "from %.0f %% of the height)"
+          % (CAMERA_HEIGHT_M, 100.0 * _GROUND_ROI_RATIO))
 
 
 
