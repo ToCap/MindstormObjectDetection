@@ -47,7 +47,7 @@ The map is only valid if the following assumptions hold; otherwise it is wrong a
 
 | Library | Functions used | Description |
 | --- | --- | --- |
-| OpenCV (`cv2`) | `getPerspectiveTransform`, `warpPerspective`, `perspectiveTransform`, `fillPoly`, `setMouseCallback` | Homography, projection, shadow polygons and calibration input. |
+| OpenCV (`cv2`) | `getPerspectiveTransform`, `warpPerspective`, `perspectiveTransform`, `blur`, `clipLine`, `line`, `fillPoly`, `setMouseCallback` | Homography, projection, shadow polygons and calibration input. |
 | NumPy | `ndarray` (`uint8`) | Storage of the grid and of the masks. |
 | `json` (Python standard library) | `load`, `dump` | Reading and writing `CALIB_FILE`. |
 
@@ -67,11 +67,11 @@ In both modes, a cell is an obstacle if a box covers it, unknown if it is hidden
 
 ### 5.2 Source interpretation
 
-**[SWS_MapFusion_00010]** ⌈ A ground mask pixel with a value `> 0` means ground, hence no obstacle at that place: value 1 is the reference surface and any value `>= 2` is another surface. In METRIC mode, the mask is projected into the grid with `cv2.warpPerspective` (nearest-neighbour interpolation, which keeps the values). In PIXEL mode, a cell is ground if at least `GROUND_COVERAGE` of its pixels are ground, and takes the surface that covers the most pixels. A cell whose surface is 1 is a `FREE` candidate, and a cell whose surface is `>= 2` is a `FREE_OTHER_SURFACE` candidate. ⌋
+**[SWS_MapFusion_00010]** ⌈ A ground mask pixel with a value `> 0` means ground, hence no obstacle at that place: value 1 is the reference surface and any value `>= 2` is another surface. Both modes use the same pipeline: the share of pixels of each surface is warped into the grid with `cv2.warpPerspective` and the pixel-to-cell matrix (`H` followed by the scaling of SWS_MapFusion_00033). In PIXEL mode, `H` is the identity (ratio 1), the scaling is `1 / CELL_SIZE_PX`, and the shares are first averaged over `CELL_SIZE_PX` pixels. A cell is ground if the shares of the two surfaces add up to at least `GROUND_COVERAGE`, and takes the surface with the larger share. A cell whose surface is 1 is a `FREE` candidate, and a cell whose surface is `>= 2` is a `FREE_OTHER_SURFACE` candidate. ⌋
 
 **[SWS_MapFusion_00011]** ⌈ A ground mask pixel equal to 0, or outside the camera field of view, brings no information: the cell stays `UNKNOWN`. ⌋
 
-**[SWS_MapFusion_00012]** ⌈ For each box `(x1, y1, x2, y2)`, the segment `(x1, y2)` to `(x2, y2)` (bottom edge, contact with the ground) gives the `OBSTACLE` candidates, thickened by `OBSTACLE_MARGIN_CELLS` cells. In METRIC mode, the segment is projected with `cv2.perspectiveTransform` and drawn in the grid; in PIXEL mode, the cells of the row of `y2` between the columns of `x1` and `x2` are used. ⌋
+**[SWS_MapFusion_00012]** ⌈ For each box `(x1, y1, x2, y2)`, the segment `(x1, y2)` to `(x2, y2)` (bottom edge, contact with the ground) gives the `OBSTACLE` candidates, thickened by `OBSTACLE_MARGIN_CELLS` cells. The segment is projected with `cv2.perspectiveTransform` and the pixel-to-cell matrix of SWS_MapFusion_00010 (the identity-based one in PIXEL mode), then drawn in the grid. ⌋
 
 **[SWS_MapFusion_00013]** ⌈ A box whose projected segment lies entirely outside the grid is ignored. ⌋
 

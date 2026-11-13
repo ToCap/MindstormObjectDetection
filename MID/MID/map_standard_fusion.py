@@ -87,7 +87,7 @@ _N_COLS = 0
 
 _H = None            # image pixels -> ground meters (robot frame)
 _H_INV = None        # ground meters -> image pixels
-_H_GRID = None       # image pixels -> grid cells (column, row)
+_H_GRID = None       # image pixels -> grid cells (column, row), both modes
 _IMAGE_SIZE = None   # (width, height) of the calibrated image
 _IMAGE_POINTS = None
 _GROUND_POINTS = None
@@ -143,6 +143,12 @@ def _meters_to_cells(points):
     cols = (pts[:, 0] + GRID_WIDTH_M / 2.0) / CELL_SIZE_M
     rows = (GRID_DEPTH_M - pts[:, 1]) / CELL_SIZE_M
     return np.stack([cols, rows], axis=1)
+
+
+def _to_cell_indices(points):
+    """Continuous cell coordinates (column, row) -> indices of the cells."""
+    pts = np.nan_to_num(np.asarray(points, dtype=np.float64), nan=0.0)
+    return np.floor(np.clip(pts, -1e6, 1e6)).astype(np.int32)
 
 
 def _to_int_points(points):
@@ -230,7 +236,7 @@ def initialize():
     follows the frame size).
     Must be called once before any other function.
     """
-    global _initialized, _N_ROWS, _N_COLS, _WARNED_NOT_CALIBRATED
+    global _initialized, _N_ROWS, _N_COLS, _WARNED_NOT_CALIBRATED, _H_GRID
 
     if MAP_MODE not in ("PIXEL", "METRIC"):
         raise ValueError("[MapFusion] unknown MAP_MODE %r" % (MAP_MODE,))
@@ -248,6 +254,9 @@ def initialize():
         print("[MapFusion] Initialized, METRIC mode (%d x %d cells)"
               % (_N_ROWS, _N_COLS))
     else:
+        # same pipeline as METRIC with an identity "ground" (ratio 1) and a
+        # scaling from pixels to cells
+        _H_GRID = np.diag([1.0 / CELL_SIZE_PX, 1.0 / CELL_SIZE_PX, 1.0])
         _N_COLS = 0
         _N_ROWS = 0
         print("[MapFusion] Initialized, PIXEL mode (%d px cells)"
@@ -496,6 +505,31 @@ def calibrate(ctx=None):
 # ==========================
 # DETECTION - OCCUPANCY GRID
 # ==========================
+def _shadow_vertical(shadow, p1, p2):
+    """
+    PIXEL mode: what is hidden behind a box is above its contact segment in
+    the image, between its columns.
+    """
+    row = max(p1[1], p2[1]) - OBSTACLE_MARGIN_CELLS
+    c1, c2 = max(min(p1[0], p2[0]), 0), max(p1[0], p2[0])
+    if row > 0:
+        shadow[:row, c1:c2 + 1] = 1
+
+
+def _shadow_rays(shadow, ground):
+    """
+    METRIC mode: the two segment ends extended along the rays from the robot
+    (ground: the segment ends in meters).
+    """
+    if np.all(ground[:, 1] > 0):
+        reach = 2.0 * np.hypot(GRID_WIDTH_M, GRID_DEPTH_M)
+        far = ground * (reach / np.hypot(ground[:, 0], ground[:, 1]))[:, None]
+        polygon = np.array([ground[0], ground[1], far[1], far[0]])
+        cv2.fillPoly(
+            shadow, [_to_cell_indices(_meters_to_cells(polygon))], 1
+        )
+
+
 def _project_box(box, obstacle, shadow):
     """
     Draws the contact segment of a box in 'obstacle' and the region hidden
@@ -505,24 +539,27 @@ def _project_box(box, obstacle, shadow):
     segment_px = [(x1, y2), (x2, y2)]
 
     cells = _transform(_H_GRID, segment_px)
-    ground = _transform(_H, segment_px)
-    if not (np.all(np.isfinite(cells)) and np.all(np.isfinite(ground))):
+    if not np.all(np.isfinite(cells)):
         return
 
     # a box whose segment lies entirely outside the grid is ignored
-    p1, p2 = (tuple(int(v) for v in p) for p in _to_int_points(cells))
-    inside, _, _ = cv2.clipLine((0, 0, _N_COLS, _N_ROWS), p1, p2)
+    p1, p2 = (tuple(int(v) for v in p) for p in _to_cell_indices(cells))
+    inside, _, _ = cv2.clipLine((0, 0, _N_COLS + 1, _N_ROWS + 1), p1, p2)
     if not inside:
         return
 
-    cv2.line(obstacle, p1, p2, 1, 1 + 2 * OBSTACLE_MARGIN_CELLS)
+    # contact segment thickened by exactly OBSTACLE_MARGIN_CELLS cells
+    segment = np.zeros_like(obstacle)
+    cv2.line(segment, p1, p2, 1, 1)
+    size = 1 + 2 * OBSTACLE_MARGIN_CELLS
+    obstacle |= cv2.dilate(segment, np.ones((size, size), np.uint8))
 
-    # shadow: the two segment ends extended along the rays from the robot
-    if np.all(ground[:, 1] > 0):
-        reach = 2.0 * np.hypot(GRID_WIDTH_M, GRID_DEPTH_M)
-        far = ground * (reach / np.hypot(ground[:, 0], ground[:, 1]))[:, None]
-        polygon = np.array([ground[0], ground[1], far[1], far[0]])
-        cv2.fillPoly(shadow, [_to_int_points(_meters_to_cells(polygon))], 1)
+    if MAP_MODE == "PIXEL":
+        _shadow_vertical(shadow, p1, p2)
+    else:
+        ground = _transform(_H, segment_px)
+        if np.all(np.isfinite(ground)):
+            _shadow_rays(shadow, ground)
 
 
 def _warn_not_calibrated():
@@ -541,51 +578,35 @@ def _merge_surface(surface, cls):
     ).astype(np.uint8)
 
 
-def _mask_to_cells_pixel(mask):
+def _ground_cells(mask):
     """
-    PIXEL mode: surface of every cell from a ground mask of the image size
-    (0 = none, 1 = reference, 2 = other). A cell is ground if at least
-    GROUND_COVERAGE of its pixels are, with the majority surface.
+    Surface of every cell (0 = none, 1 = reference, 2 = other) from a ground
+    mask of the image size. The share of each surface is warped into the grid
+    with the pixel-to-cell matrix; in PIXEL mode it is first averaged over
+    the cell size. A cell is ground if the shares add up to at least
+    GROUND_COVERAGE, and takes the larger one.
     """
-    s = CELL_SIZE_PX
-    h, w = mask.shape[:2]
     cls = np.minimum(mask, 2)
+    pixel = MAP_MODE == "PIXEL"
+
+    # dst index i samples the centre (i + 0.5) of the cell i
+    to_cell_centre = np.array([[1.0, 0.0, -0.5], [0.0, 1.0, -0.5],
+                               [0.0, 0.0, 1.0]]) @ _H_GRID
 
     share = []
     for k in (1, 2):
-        part = cv2.copyMakeBorder(
-            (cls == k).astype(np.float32), 0, _N_ROWS * s - h,
-            0, _N_COLS * s - w, cv2.BORDER_REPLICATE
-        )
-        share.append(cv2.resize(part, (_N_COLS, _N_ROWS),
-                                interpolation=cv2.INTER_AREA))
+        part = (cls == k).astype(np.float32)
+        if pixel:
+            part = cv2.blur(part, (CELL_SIZE_PX, CELL_SIZE_PX))
+        share.append(cv2.warpPerspective(
+            part, to_cell_centre, (_N_COLS, _N_ROWS), flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REPLICATE if pixel else cv2.BORDER_CONSTANT,
+            borderValue=0
+        ))
 
-    covered = (share[0] + share[1]) >= GROUND_COVERAGE
     cells = np.where(share[0] >= share[1], 1, 2).astype(np.uint8)
-    cells[~covered] = 0
+    cells[(share[0] + share[1]) < GROUND_COVERAGE] = 0
     return cells
-
-
-def _project_box_pixel(box, obstacle, shadow):
-    """
-    PIXEL mode: the bottom edge of the box gives the obstacle cells, and
-    the cells above it (behind it in the image) are the shadow.
-    """
-    s = CELL_SIZE_PX
-    x1, y1, x2, y2 = box
-
-    # a box entirely outside the grid is ignored
-    if x2 < 0 or y2 < 0 or x1 >= _N_COLS * s:
-        return
-
-    c1 = int(np.clip(x1 // s, 0, _N_COLS - 1))
-    c2 = int(np.clip(x2 // s, 0, _N_COLS - 1))
-    row = int(np.clip(y2 // s, 0, _N_ROWS - 1))
-    m = OBSTACLE_MARGIN_CELLS
-
-    obstacle[max(row - m, 0):min(row + m, _N_ROWS - 1) + 1,
-             max(c1 - m, 0):min(c2 + m, _N_COLS - 1) + 1] = 1
-    shadow[:max(row - m, 0), c1:c2 + 1] = 1
 
 
 def detect(ctx):
@@ -605,9 +626,6 @@ def detect(ctx):
     if MAP_MODE == "PIXEL":
         _N_COLS = -(-w_img // CELL_SIZE_PX)
         _N_ROWS = -(-h_img // CELL_SIZE_PX)
-        project_box = _project_box_pixel
-    else:
-        project_box = _project_box
 
     grid = np.full((_N_ROWS, _N_COLS), int(CellState.UNKNOWN), dtype=np.uint8)
 
@@ -635,23 +653,16 @@ def detect(ctx):
         if hasattr(module, "is_calibrated") and not module.is_calibrated():
             module.calibrate(ctx)
 
-        mask = module.detect(ctx, **kwargs)
-        if MAP_MODE == "PIXEL":
-            cls = _mask_to_cells_pixel(mask)
-        else:
-            cls = np.minimum(cv2.warpPerspective(
-                mask, _H_GRID, (_N_COLS, _N_ROWS),
-                flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT,
-                borderValue=0
-            ), 2)
-        surface = _merge_surface(surface, cls)
+        surface = _merge_surface(
+            surface, _ground_cells(module.detect(ctx, **kwargs))
+        )
 
     # obstacle sources: contact segment and shadow of every box
     obstacle = np.zeros((_N_ROWS, _N_COLS), dtype=np.uint8)
     shadow = np.zeros((_N_ROWS, _N_COLS), dtype=np.uint8)
     for module, kwargs in OBSTACLE_SOURCES:
         for box in module.detect(ctx, **kwargs):
-            project_box(box, obstacle, shadow)
+            _project_box(box, obstacle, shadow)
 
     grid[surface == 1] = CellState.FREE
     grid[surface == 2] = CellState.FREE_OTHER_SURFACE
