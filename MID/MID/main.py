@@ -26,7 +26,12 @@ import map_standard_fusion as map_fusion
 # ==========================
 # OBJECT DETECTION � TENSORFLOW
 # ==========================
-#import object_tensorflow_ssd as object_tf
+try:
+    import object_tensorflow_ssd as object_tf
+except ImportError as exc:
+    # TensorFlow not installed: the AI view stays a black placeholder
+    print("[main] object_tensorflow_ssd unavailable (%s)" % exc)
+    object_tf = None
 #import ground_tensorflow_mobilenet as ground_tf
 
 # ==========================
@@ -37,7 +42,8 @@ import map_standard_fusion as map_fusion
 # An empty list is a placeholder view (black).
 VIEWS = [
     [[ground_tex], [bbox_contour]],   # top    : HSV texture | bbox
-    [[map_fusion], []],              # bottom : 2D occupancy grid | AI results
+    [[map_fusion], [object_tf] if object_tf else []],
+                                     # bottom : 2D occupancy grid | TensorFlow SSD
 ]
 
 # Modules whose calibration is NOT started automatically on the first frame
