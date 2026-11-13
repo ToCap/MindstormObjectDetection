@@ -6,8 +6,17 @@ import numpy as np
 # GLOBAL MODEL STATE
 # ==========================
 _GROUND_MODELS = []   # list of (mean, std) in HSV, one per ground texture
-_GROUND_ROI_RATIO = 0.6
 _initialized = False
+
+# Analysed area: from this fraction of the image height down to the bottom.
+# It depends on the camera: a camera close to the floor (12 cm) sees the floor
+# up to about 40 % of the height; the region growing below keeps the mask
+# from spreading over the furniture
+_DEFAULT_ROI_RATIO = 0.4
+_GROUND_ROI_RATIO = _DEFAULT_ROI_RATIO
+
+# Learning area: bottom of the image (fraction of the image height)
+_SAMPLE_BOTTOM_RATIO = 0.12
 
 # Learning area: bottom strip, centred (fraction of the image width)
 _SAMPLE_WIDTH_RATIO = 1.0
@@ -35,7 +44,12 @@ _V_TOLERANCE_FACTOR = 1.5
 _OPEN_KERNEL_SIZE = 9      # removes thin objects (legs) and isolated spots
 _EDGE_DILATE_SIZE = 3      # thickness of the contours cut out of the mask
 _EDGE_BLUR_SIZE = 9        # smoothing before Canny (ignores fine textures)
-_EDGE_MIN_LENGTH = 25      # only horizontal contours at least this long (px)
+_EDGE_MIN_LENGTH = 25      # only contours at least this long (px)
+_MAX_HOLE_AREA = 400       # enclosed holes up to this area (px) are filled
+
+# Canny thresholds (low, high) on the Lab channels L, a, b: colour contours
+# are cut out of the mask even when the grey levels are close
+_EDGE_THRESHOLDS = ((10, 30), (4, 12), (4, 12))
 
 # Colours (BGR) used by draw() for texture 1, 2, ...
 _DRAW_COLORS = [(0, 255, 0), (255, 255, 0)]
@@ -51,7 +65,7 @@ def initialize():
     """
     global _GROUND_ROI_RATIO
 
-    _GROUND_ROI_RATIO = 0.6
+    _GROUND_ROI_RATIO = _DEFAULT_ROI_RATIO
 
     print("[GroundModel] Structure initialized")
 
@@ -71,14 +85,13 @@ def calibrate(ctx):
     frame_bgr = ctx.frame
     h, w = frame_bgr.shape[:2]
 
-    roi = frame_bgr[int(h * _GROUND_ROI_RATIO):h, :]
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-
-    # Sample bottom part of ROI to avoid obstacles
+    # Sample the bottom of the image to avoid obstacles
     # (centred area, see _SAMPLE_WIDTH_RATIO)
+    hsv = cv2.cvtColor(frame_bgr[int(h * (1.0 - _SAMPLE_BOTTOM_RATIO)):, :],
+                       cv2.COLOR_BGR2HSV)
     x0 = int(w * (1.0 - _SAMPLE_WIDTH_RATIO) / 2.0)
     x1 = w - x0
-    sample = hsv[int(roi.shape[0] * 0.7):, x0:x1]
+    sample = hsv[:, x0:x1]
     pixels = sample.reshape(-1, 3)
 
     # split the sample in textures (k-means on weighted HSV)
@@ -152,28 +165,54 @@ def detect(ctx, std_factor=2.0):
 
     mask = np.where(texture > 0, 255, 0).astype(np.uint8)
 
-    # fill small holes, then cut the contours (base of the furniture)
+    # fill small holes, then cut the colour contours (base of the furniture)
     kernel = np.ones((5, 5), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
-    # long horizontal contours only (base of furniture): fine textures
-    # such as a rug are smoothed out and short edges are dropped
-    gray = cv2.GaussianBlur(ctx.gray[y0:h, :], (_EDGE_BLUR_SIZE,) * 2, 0)
-    edges = cv2.Canny(gray, 20, 60)
-    edges = cv2.morphologyEx(
-        edges, cv2.MORPH_OPEN, np.ones((1, _EDGE_MIN_LENGTH), np.uint8)
+    # contours of the Lab channels, smoothed: fine textures (rug) vanish, long
+    # contours (furniture, walls) stay
+    lab = cv2.cvtColor(
+        cv2.GaussianBlur(roi, (_EDGE_BLUR_SIZE,) * 2, 0), cv2.COLOR_BGR2Lab
     )
-    edges = cv2.dilate(edges, np.ones((_EDGE_DILATE_SIZE,) * 2, np.uint8))
-    mask[edges > 0] = 0
+    edges = np.zeros(mask.shape, dtype=np.uint8)
+    for channel, (low, high) in zip(cv2.split(lab), _EDGE_THRESHOLDS):
+        edges |= cv2.Canny(channel, low, high)
+    long_edges = cv2.morphologyEx(
+        edges, cv2.MORPH_OPEN, np.ones((1, _EDGE_MIN_LENGTH), np.uint8)
+    ) | cv2.morphologyEx(
+        edges, cv2.MORPH_OPEN, np.ones((_EDGE_MIN_LENGTH, 1), np.uint8)
+    )
+    long_edges = cv2.dilate(
+        long_edges, np.ones((_EDGE_DILATE_SIZE,) * 2, np.uint8)
+    )
+    mask[long_edges > 0] = 0
 
     # remove thin objects and isolated spots
     kernel = np.ones((_OPEN_KERNEL_SIZE,) * 2, np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
 
-    # keep only the regions connected to the bottom of the image
+    # region growing from the bottom: keep only the regions connected to the
+    # bottom of the image
     _, labels = cv2.connectedComponents(mask)
     bottom = np.unique(labels[-1, :])
     keep = np.isin(labels, bottom[bottom > 0])
+
+    # fill the small holes enclosed in the ground (dark spots)
+    holes = np.where(keep, 0, 255).astype(np.uint8)
+    n, hole_labels, stats, _ = cv2.connectedComponentsWithStats(
+        holes, connectivity=4
+    )
+    x, y, w_h, h_h, area = (stats[:, i] for i in range(5))
+    touches = (x == 0) | (y == 0) | (x + w_h == keep.shape[1]) \
+        | (y + h_h == keep.shape[0])
+    small = ~touches & (area <= _MAX_HOLE_AREA)
+    small[0] = False
+    keep |= small[hole_labels]
+
+    # pixels added by the closing or by the filling take the main texture
+    if keep.any():
+        main = int(np.bincount(texture[keep], minlength=3)[1:].argmax()) + 1
+        texture[keep & (texture == 0)] = main
 
     mask_full[y0:h, :] = np.where(keep, texture, 0)
     return mask_full

@@ -1,12 +1,12 @@
 # SWS Map Standard Fusion (MID)
 
-Module: `map_standard_fusion.py` · Status: draft 0.3 · Date: 2026-11-12
+Module: `map_standard_fusion.py` · Status: draft 0.4 · Date: 2026-11-13
 
 ## 1 Introduction and functional overview
 
 The `map_standard_fusion` module builds a 2D occupancy grid from a single camera: it fuses ground sources (today `ground_standard_texture`) with obstacle sources (today `bbox_standard_contour`), and expresses the result in one of two geometries selected by `MAP_MODE`: **PIXEL** (default), cells are blocks of the camera image and no calibration is needed; **METRIC** (optional), cells are squares on the ground around the robot, through a calibrated homography. Other models can be added to either list later.
 
-Each grid cell is **free**, **free on another surface**, **obstacle** or **unknown**. A ground texture means ground, hence no obstacle; the reference texture gives *free* and any other texture gives *free on another surface* (for example a rug on a wooden floor). A box means an obstacle. The map is recomputed on every frame, with no memory and no robot pose; it is displayed in the lower-left view of the 2 × 2 OpenCV HMI. In PIXEL mode the map is the camera view in blocks: it is distorted by the perspective and gives no distance in meters.
+Each grid cell is **free**, **free on another surface**, **obstacle** or **unknown**. A ground texture means ground, hence no obstacle; the reference texture gives *free* and any other texture gives *free on another surface* (for example a rug on a wooden floor). A box means an obstacle. The map is recomputed on every frame, with no robot pose and no memory other than a per-cell debounce counter that avoids flickering; it is displayed in the lower-left view of the 2 × 2 OpenCV HMI. In PIXEL mode the map is the camera view in blocks: it is distorted by the perspective and gives no distance in meters.
 
 Out of scope for this version: a map accumulated over time, robot pose, depth estimation, object tracking and sending the map to the robot.
 
@@ -26,8 +26,8 @@ The map is only valid if the following assumptions hold; otherwise it is wrong a
 | --- | --- |
 | A1 | The ground is flat between the robot and the far edge of the grid. |
 | A2 | The camera is fixed relative to the robot: its height and tilt have not changed since the calibration. |
-| A3 | There is a single camera and no depth measurement. The map is local and recomputed on every frame, without robot pose. In PIXEL mode, what is hidden behind an obstacle is assumed to be the part of the image above its bottom edge. |
-| A4 | A ground source returns a mask of the image size: 0 = no information, 1 = reference surface, ≥ 2 = another surface. `ground_tex` only covers the lower part of the image (ROI from 60 % to 100 % of the height); elsewhere it is 0. |
+| A3 | There is a single camera and no depth measurement. The map is local and recomputed on every frame, without robot pose (apart from the debounce of 5.3, which only smooths detections over a few frames). In PIXEL mode, what is hidden behind an obstacle is assumed to be the part of the image above its bottom edge. |
+| A4 | A ground source returns a mask of the image size: 0 = no information, 1 = reference surface, ≥ 2 = another surface. `ground_tex` only covers the lower part of the image (ROI from 40 % to 100 % of the height by default, set for a camera close to the floor); elsewhere it is 0. |
 | A5 | `bbox_contour` returns pixel rectangles `(x1, y1, x2, y2)`. The map requests them without enlargement (`scale = 1.0`), so the bottom edge of a box is the contact with the ground. |
 | A6 | Python with OpenCV and NumPy only; no TensorFlow in this module. |
 
@@ -39,7 +39,7 @@ The map is only valid if the following assumptions hold; otherwise it is wrong a
 
 | Module | Interface | Description |
 | --- | --- | --- |
-| `ground_standard_texture` (`ground_tex`) | `is_calibrated()`, `calibrate(ctx)`, `detect(ctx)` | Ground source. Mask: `uint8` array of the image size, 0 = no ground, 1 = texture 1 (reference surface), 2 = texture 2 (another surface). The textures are learned from the bottom of the frame (2 clusters, merged if too close). The module relearns them at every frame while `is_calibrated()` returns `False`. |
+| `ground_standard_texture` (`ground_tex`) | `is_calibrated()`, `calibrate(ctx)`, `detect(ctx)` | Ground source. Mask: `uint8` array of the image size, 0 = no ground, 1 = texture 1 (reference surface), 2 = texture 2 (another surface). The textures are learned from the bottom of the frame (2 clusters, merged if too close). The mask is the region of the texture colours that is connected to the bottom of the image and delimited by the colour contours. The module relearns them at every frame while `is_calibrated()` returns `False`. |
 | `bbox_standard_contour` (`bbox_contour`) | `detect(ctx, scale=1.0)` | Obstacle source. List of `(x1, y1, x2, y2)` pixel rectangles. `scale = 1.0` disables the enlargement. |
 | `preprocessing` | `FrameContext` | `frame`, `gray` and `edges`, computed once per frame. |
 
@@ -95,7 +95,15 @@ In both modes, a cell is an obstacle if a box covers it, unknown if it is hidden
 
 **[SWS_MapFusion_00022]** ⌈ The absence of a box is never information: it does not make a cell free. ⌋
 
-**[SWS_MapFusion_00023]** ⌈ There is no temporal memory: two successive frames give two independent maps. ⌋
+**[SWS_MapFusion_00023]** ⌈ The only temporal memory is the debounce of SWS_MapFusion_00025 to 00028. There is no robot pose and no accumulation of the map: with `N = 1`, two successive frames give two independent maps. ⌋
+
+**[SWS_MapFusion_00025]** ⌈ Each source has, for every cell of the grid, one counter `c` in `[0, N]` and a boolean `detected`, initially 0 and `False`. A source gives a detection for a cell (the cell is covered by a ground texture, or by a box or a shadow) or no detection. `N` is a parameter of the source (`DEBOUNCE_GROUND_N`, `DEBOUNCE_OBSTACLE_N`). ⌋
+
+**[SWS_MapFusion_00026]** ⌈ At every frame, `c` is increased by `up` on a detection and decreased by `down` on a missing detection, and limited to `[0, N]`. A source has either a fast attack (`up = N`, `down = max(N/3, 1)`) or a slow attack (`up = max(N/3, 1)`, `down = N`). Ground sources have a fast attack (detected at once, lost after about 3 frames); obstacle sources have a slow attack (detected after about 3 frames, lost at once). With `N = 3`, the ground sources use `+3` and `-1`. `N = 1` disables the debounce. ⌋
+
+**[SWS_MapFusion_00027]** ⌈ `detected` changes to `True` when `c` reaches `N`, and to `False` when `c` reaches 0. The counter is then on the bound of the new state and is not changed by the change of state. ⌋
+
+**[SWS_MapFusion_00028]** ⌈ The fusion of 5.3 only uses the debounced result: a cell where `detected` is `True` keeps the last detection seen (the surface 1 or 2 of a ground source, the obstacle or the shadow of an obstacle source), and a cell where `detected` is `False` brings no information. The counters are reset when the grid size changes and at `initialize`. The granularity is the cell of the grid (`CELL_SIZE_PX` or `CELL_SIZE_M`). ⌋
 
 **[SWS_MapFusion_00024]** ⌈ A ground texture only says that the floor is visible at that place. It never cancels an obstacle: the box that stands on it keeps priority 1, and the cells hidden behind it stay `UNKNOWN` even if a texture covers them. ⌋
 
@@ -281,7 +289,7 @@ sequenceDiagram
     G-->>F: ground mask (0, 1, 2)
     F->>B: detect(ctx, scale=BBOX_SCALE) (each obstacle source)
     B-->>F: boxes
-    Note right of F: project, shadow, fuse
+    Note right of F: project, shadow, debounce, fuse
     F-->>M: grid
     M->>F: draw(overlay, grid)
 ```
@@ -302,8 +310,10 @@ The parameters are constants at the top of `map_standard_fusion.py`. In METRIC m
 | `CELL_SIZE_M` | float | > 0 | 0.05 | METRIC mode: side of one cell, in meters. |
 | `OBSTACLE_MARGIN_CELLS` | int | ≥ 0 | 1 | Thickness added around the contact segment of a box. |
 | `BBOX_SCALE` | float | > 0 | 1.0 | Enlargement requested from `bbox_contour`; 1.0 means none. |
-| `GROUND_SOURCES` | list of (module, dict) | ground sources (A4) | `[(ground_tex, {})]` | Models giving the ground; the dict holds the keyword arguments of `detect`. |
-| `OBSTACLE_SOURCES` | list of (module, dict) | obstacle sources | `[(bbox_contour, {"scale": BBOX_SCALE})]` | Models giving obstacle boxes. |
+| `DEBOUNCE_GROUND_N` | int | ≥ 1 | 3 | `N` of the ground sources (fast attack, SWS_MapFusion_00026); 1 disables the debounce. |
+| `DEBOUNCE_OBSTACLE_N` | int | ≥ 1 | 3 | `N` of the obstacle sources (slow attack); 1 disables the debounce. |
+| `GROUND_SOURCES` | list of (module, dict, int, bool) | ground sources (A4) | `[(ground_tex, {}, DEBOUNCE_GROUND_N, True)]` | Models giving the ground: module, keyword arguments of `detect`, `N` of the debounce, fast attack. |
+| `OBSTACLE_SOURCES` | list of (module, dict, int, bool) | obstacle sources | `[(bbox_contour, {"scale": BBOX_SCALE}, DEBOUNCE_OBSTACLE_N, False)]` | Models giving obstacle boxes, with the same fields. |
 | `CALIB_RECT_WIDTH_M` | float | > 0 | 0.40 | Width of the rectangle laid on the floor for the calibration. |
 | `CALIB_RECT_DEPTH_M` | float | > 0 | 0.60 | Depth of that rectangle. |
 | `CALIB_RECT_NEAR_M` | float | ≥ 0 | 0.30 | Distance between the robot and the near edge of the rectangle. |

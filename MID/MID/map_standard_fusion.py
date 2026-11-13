@@ -35,7 +35,21 @@ CALIB_FILE = "map_calibration.json"
 
 DRAW_GRID_STEP_M = 0.5      # spacing of the ticks and of the control grid
 
-# Sources fused into the grid, as (module, keyword arguments of detect).
+# Temporal debounce, to avoid flickering. One counter per cell and per
+# source, between 0 and N. On a detection it moves by "up", on a missing
+# detection by "down" (the opposite one is N/3, at least 1):
+#  - fast attack (ground): up = N, down = N/3 -> detected at once, lost
+#    after about 3 frames
+#  - slow attack (obstacles): up = N/3, down = N -> detected after about 3
+#    frames, lost at once
+# The detected state changes when the counter reaches N (becomes detected)
+# or 0 (becomes not detected); it already sits on that bound, so the counter
+# is not moved again. N = 1 disables the debounce.
+DEBOUNCE_GROUND_N = 3
+DEBOUNCE_OBSTACLE_N = 3
+
+# Sources fused into the grid, as (module, keyword arguments of detect,
+# debounce N, fast attack).
 # Another model is added by appending it to the right list.
 #  - ground source: detect(ctx) -> uint8 image of the frame size, 0 = no
 #    information, 1 = reference ground surface, >= 2 = ground of another
@@ -43,8 +57,10 @@ DRAW_GRID_STEP_M = 0.5      # spacing of the ticks and of the control grid
 #    are used if the module has them
 #  - obstacle source: detect(ctx) -> list of (x1, y1, x2, y2) boxes whose
 #    bottom edge touches the ground
-GROUND_SOURCES = [(ground_tex, {})]
-OBSTACLE_SOURCES = [(bbox_contour, {"scale": BBOX_SCALE})]
+GROUND_SOURCES = [(ground_tex, {}, DEBOUNCE_GROUND_N, True)]
+OBSTACLE_SOURCES = [
+    (bbox_contour, {"scale": BBOX_SCALE}, DEBOUNCE_OBSTACLE_N, False)
+]
 
 
 # interactive calibration: main.py asks for it only once, not at every frame
@@ -76,6 +92,47 @@ _ERROR_NAMES = {
     MAP_E_BAD_FRAME: "MAP_E_BAD_FRAME",
     MAP_E_WRONG_MODE: "MAP_E_WRONG_MODE",
 }
+
+
+# ==========================
+# TEMPORAL DEBOUNCE
+# ==========================
+class _Debounce:
+    """
+    Per-cell hysteresis of one source. 'raw' is a map of classes (0 = no
+    detection, > 0 = what is detected); the output keeps the last class seen
+    while the cell is in the detected state.
+    """
+
+    def __init__(self, n, fast_attack):
+        self.max = max(int(n), 1)
+        other = max(self.max // 3, 1)
+        self.up, self.down = (self.max, other) if fast_attack else (other, self.max)
+        self.count = None
+        self.state = None
+        self.last = None
+
+    def update(self, raw):
+        if self.count is None or self.count.shape != raw.shape:
+            self.count = np.zeros(raw.shape, dtype=np.int32)
+            self.state = np.zeros(raw.shape, dtype=bool)
+            self.last = np.zeros(raw.shape, dtype=np.uint8)
+
+        seen = raw > 0
+        self.last[seen] = raw[seen]
+
+        self.count = np.clip(
+            np.where(seen, self.count + self.up, self.count - self.down),
+            0, self.max
+        )
+        becomes_on = ~self.state & (self.count >= self.max)
+        becomes_off = self.state & (self.count <= 0)
+        self.state = (self.state | becomes_on) & ~becomes_off
+
+        return np.where(self.state, self.last, 0).astype(np.uint8)
+
+
+_DEBOUNCERS = {}
 
 
 # ==========================
@@ -241,8 +298,10 @@ def initialize():
     if MAP_MODE not in ("PIXEL", "METRIC"):
         raise ValueError("[MapFusion] unknown MAP_MODE %r" % (MAP_MODE,))
 
-    for module, _ in GROUND_SOURCES + OBSTACLE_SOURCES:
+    _DEBOUNCERS.clear()
+    for module, _, n, fast in GROUND_SOURCES + OBSTACLE_SOURCES:
         module.initialize()
+        _DEBOUNCERS[id(module)] = _Debounce(n, fast)
 
     _WARNED_NOT_CALIBRATED = False
     _clear_calibration()
@@ -649,25 +708,28 @@ def detect(ctx):
 
     # ground sources: reference surface (1) wins over another surface (2)
     surface = np.zeros((_N_ROWS, _N_COLS), dtype=np.uint8)
-    for module, kwargs in GROUND_SOURCES:
+    for module, kwargs, _, _ in GROUND_SOURCES:
         if hasattr(module, "is_calibrated") and not module.is_calibrated():
             module.calibrate(ctx)
 
-        surface = _merge_surface(
-            surface, _ground_cells(module.detect(ctx, **kwargs))
-        )
+        cells = _ground_cells(module.detect(ctx, **kwargs))
+        surface = _merge_surface(surface, _DEBOUNCERS[id(module)].update(cells))
 
-    # obstacle sources: contact segment and shadow of every box
-    obstacle = np.zeros((_N_ROWS, _N_COLS), dtype=np.uint8)
-    shadow = np.zeros((_N_ROWS, _N_COLS), dtype=np.uint8)
-    for module, kwargs in OBSTACLE_SOURCES:
+    # obstacle sources: contact segment (2) and shadow (1) of every box
+    hidden = np.zeros((_N_ROWS, _N_COLS), dtype=np.uint8)
+    for module, kwargs, _, _ in OBSTACLE_SOURCES:
+        obstacle = np.zeros((_N_ROWS, _N_COLS), dtype=np.uint8)
+        shadow = np.zeros((_N_ROWS, _N_COLS), dtype=np.uint8)
         for box in module.detect(ctx, **kwargs):
             _project_box(box, obstacle, shadow)
 
+        raw = np.where(obstacle > 0, 2, shadow).astype(np.uint8)
+        hidden = np.maximum(hidden, _DEBOUNCERS[id(module)].update(raw))
+
     grid[surface == 1] = CellState.FREE
     grid[surface == 2] = CellState.FREE_OTHER_SURFACE
-    grid[shadow > 0] = CellState.UNKNOWN
-    grid[obstacle > 0] = CellState.OBSTACLE
+    grid[hidden == 1] = CellState.UNKNOWN
+    grid[hidden == 2] = CellState.OBSTACLE
 
     return grid
 
