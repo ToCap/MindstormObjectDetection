@@ -67,3 +67,33 @@ flowchart LR
     F --> A
     A -->|Mise à jour| G[Cartographie du robot grille d’occupation]
 ```
+
+## Démarrage
+
+Prérequis : Python 3.9 ou plus, une caméra (index 1 par défaut dans `main.py`).
+
+### Sous VS Code
+
+1. Ouvrir le dossier du dépôt (ou `MID.code-workspace`) et installer les extensions recommandées.
+2. Lancer la tâche `MID: setup environment` (Terminal > Exécuter la tâche) : crée `.venv` et installe `requirements.txt`.
+3. Sélectionner l'interpréteur `.venv` si VS Code le demande.
+4. F5 avec la configuration `MID main` (ou `MID test`).
+
+Sous Linux/macOS, remplacer `.venv/Scripts/python.exe` par `.venv/bin/python` dans `.vscode/settings.json` et `.vscode/tasks.json`.
+
+### Sous Visual Studio
+
+1. Ouvrir `MID/MID.sln`.
+2. Créer ou choisir un environnement Python 3.9+ (fenêtre « Environnements Python ») et installer les paquets de `requirements.txt`.
+3. Démarrer avec `main.py` (fichier de démarrage du projet).
+
+Visual Studio reste supporté pendant la période de migration vers VS Code.
+
+### Vérification dans les deux IDE
+
+- [ ] Environnement créé à partir de `requirements.txt`.
+- [ ] `main.py` démarre et la caméra s'ouvre.
+- [ ] Un point d'arrêt dans le `detect` d'un module est atteint.
+- [ ] `CALIB_FILE` est lu et écrit dans le dossier attendu.
+- [ ] `object_tensorflow_ssd` se charge (ou l'absence de TensorFlow est gérée).
+- [ ] Les spécifications Markdown sont lisibles.
