@@ -1,0 +1,15 @@
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+
+[*.{py,pyproj,sln}]
+end_of_line = crlf
+
+[*.md]
+end_of_line = lf
+
+# Legacy ANSI (cp1252) sources: keep the editor encoding auto-detection
+[MID/MID/{bbox_standard_contour,circle_standard_hough,contour_standard_canny,ground_standard_geometry,object_tensorflow_ssd}.py]
+charset = unset
