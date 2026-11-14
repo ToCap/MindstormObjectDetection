@@ -49,7 +49,6 @@ The map is only valid if the following assumptions hold; otherwise it is wrong a
 | --- | --- | --- |
 | OpenCV (`cv2`) | `getPerspectiveTransform`, `warpPerspective`, `perspectiveTransform`, `blur`, `clipLine`, `line`, `fillPoly`, `setMouseCallback` | Homography, projection, shadow polygons and calibration input. |
 | NumPy | `ndarray` (`uint8`) | Storage of the grid and of the masks. |
-| `json` (Python standard library) | `load`, `dump` | Reading and writing `CALIB_FILE`. |
 
 ## 5 Functional specification
 
