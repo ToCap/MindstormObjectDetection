@@ -1,0 +1,29 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "MID main",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/MID/MID/main.py",
+            "cwd": "${workspaceFolder}/MID/MID",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "MID test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/MID/MID/test.py",
+            "cwd": "${workspaceFolder}/MID/MID",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "MID current file",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "cwd": "${fileDirname}",
+            "console": "integratedTerminal"
+        }
+    ]
+}

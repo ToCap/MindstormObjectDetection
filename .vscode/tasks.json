@@ -1,0 +1,28 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "MID: create venv",
+            "type": "shell",
+            "command": "python -m venv .venv",
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": []
+        },
+        {
+            "label": "MID: install requirements",
+            "type": "shell",
+            "command": "${workspaceFolder}/.venv/Scripts/python.exe -m pip install -r requirements.txt",
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": []
+        },
+        {
+            "label": "MID: setup environment",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "MID: create venv",
+                "MID: install requirements"
+            ],
+            "problemMatcher": []
+        }
+    ]
+}
