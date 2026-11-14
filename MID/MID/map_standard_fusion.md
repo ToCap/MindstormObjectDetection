@@ -1,14 +1,10 @@
 # SWS Map Standard Fusion (MID)
 
-Module: `map_standard_fusion.py` · Status: draft 0.4 · Date: 2026-11-13
-
 ## 1 Introduction and functional overview
 
 The `map_standard_fusion` module builds a 2D occupancy grid from a single camera: it fuses ground sources (today `ground_standard_texture`) with obstacle sources (today `bbox_standard_contour`), and expresses the result in one of two geometries selected by `MAP_MODE`: **PIXEL** (default), cells are blocks of the camera image and no calibration is needed; **METRIC** (optional), cells are squares on the ground around the robot, through a calibrated homography. Other models can be added to either list later.
 
 Each grid cell is **free**, **free on another surface**, **obstacle** or **unknown**. A ground texture means ground, hence no obstacle; the reference texture gives *free* and any other texture gives *free on another surface* (for example a rug on a wooden floor). A box means an obstacle. The map is recomputed on every frame, with no robot pose and no memory other than a per-cell debounce counter that avoids flickering; it is displayed in the lower-left view of the 2 × 2 OpenCV HMI. In PIXEL mode the map is the camera view in blocks: it is distorted by the perspective and gives no distance in meters.
-
-Out of scope for this version: a map accumulated over time, robot pose, depth estimation, object tracking and sending the map to the robot.
 
 ## 2 Acronyms and Abbreviations
 

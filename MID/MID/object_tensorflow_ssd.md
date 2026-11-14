@@ -1,14 +1,10 @@
 # SWS Object TensorFlow SSD (MID)
 
-Module: `object_tensorflow_ssd.py` · Status: draft 0.1 · Date: 2026-11-14
-
 ## 1 Introduction and functional overview
 
 The `object_tensorflow_ssd` module detects objects in the camera frame with a pre-trained TensorFlow model (SSD MobileNet v2, trained on the COCO dataset). For each detected object it returns a bounding box, a confidence score and a class identifier, and it can draw them with the name of the class.
 
 In the project, the module is the AI reference: it is shown in a view of the OpenCV HMI and it is the source of truth of `bbox_standard_tuning`.
-
-Out of scope for this version: training or fine tuning of the model, filtering of the classes (done by the callers), tracking, and the choice of another model.
 
 ## 2 Acronyms and Abbreviations
 
@@ -116,7 +112,7 @@ The module exposes the four common functions `initialize`, `calibrate`, `detect`
 | Reentrancy | Reentrant |
 | Parameters (in) | `ctx`: ignored. |
 | Return value | None |
-| Description | The model needs no frame-based initialisation: does nothing. Present for the common interface of the detection modules. |
+| Description | Minimum implementation to satisfy the common detection module interface. |
 
 #### 6.2.3 detect
 
@@ -166,8 +162,4 @@ sequenceDiagram
 
 ## 8 Configuration specification
 
-The module has no tunable constant: the model is fixed in `initialize` and the class names are the table `LABELS` at the top of the file. The only parameter is the argument of `draw`.
-
-| Parameter name | Type | Range | Default | Description |
-| --- | --- | --- | --- | --- |
-| `score_threshold` | float | [0, 1] | 0.5 | Argument of `draw`: smallest score of a detection that is shown. |
+The module has no configuration parameter: the model is fixed in `initialize` and the class names are the table `LABELS` at the top of the file.

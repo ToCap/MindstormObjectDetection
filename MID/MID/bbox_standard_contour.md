@@ -1,14 +1,10 @@
 # SWS BBox Standard Contour (MID)
 
-Module: `bbox_standard_contour.py` · Status: draft 0.3 · Date: 2026-11-14
-
 ## 1 Introduction and functional overview
 
 The `bbox_standard_contour` module detects candidate objects as bounding boxes from the contour image of the frame: it takes the external contours of `ctx.edges`, keeps those whose area and aspect ratio fit the limits given to `detect`, and returns the bounding rectangle of each, optionally enlarged around its centre.
 
 The module has no state. Its five filtering parameters are arguments of `detect` with default values, so every caller can use its own values: `map_standard_fusion` asks for no enlargement, and `bbox_standard_tuning` passes the parameters it tests.
-
-Out of scope for this version: contour computation (done once per frame by `preprocessing`), classification of the boxes, tracking, and automatic parameter search.
 
 ## 2 Acronyms and Abbreviations
 
@@ -98,7 +94,7 @@ The module exposes the four common functions `initialize`, `calibrate`, `detect`
 | Reentrancy | Reentrant |
 | Parameters (in) | None |
 | Return value | None |
-| Description | The module is stateless: prints a message and does nothing else. Present for the common interface of the detection modules. |
+| Description | Minimum implementation to satisfy the common detection module interface. |
 
 #### 6.2.2 calibrate
 
@@ -111,7 +107,7 @@ The module exposes the four common functions `initialize`, `calibrate`, `detect`
 | Reentrancy | Reentrant |
 | Parameters (in) | `ctx`: ignored. |
 | Return value | None |
-| Description | Nothing to learn: prints a message and does nothing else. Present for the common interface of the detection modules. |
+| Description | Minimum implementation to satisfy the common detection module interface. |
 
 #### 6.2.3 detect
 
@@ -159,11 +155,7 @@ sequenceDiagram
     M->>B: draw(overlay, boxes)
 ```
 
-A caller that needs other values (`map_standard_fusion`, `bbox_standard_tuning`) gives them as arguments of `detect`.
-
 ## 8 Configuration specification
-
-The parameters are the arguments of `detect`; the defaults are written in its signature, not in module constants.
 
 | Parameter name | Type | Range | Default | Description |
 | --- | --- | --- | --- | --- |

@@ -1,14 +1,10 @@
 # SWS BBox Standard Tuning (MID)
 
-Module: `bbox_standard_tuning.py` · Status: draft 0.4 · Date: 2026-11-14
-
 ## 1 Introduction and functional overview
 
 The `bbox_standard_tuning` module helps to tune a bounding-box model, the **tested model** (today `bbox_standard_contour`), against a **source of truth** (today `object_tensorflow_ssd`). At every frame it runs both models, projects the boxes of the source on the image of the tested model, enlarges them by 15 %, and compares the surface they share with the boxes of the tested model. The result is a **validity** score between 0 and 1, the harmonic mean of two sub-scores: the **coverage** (does the tested model cover the source objects?) and the **precision** (do its boxes stay within the source objects, with a margin of 15 %?).
 
 The parameters belong to the tested model (they are the arguments of its `detect`, with their defaults); the module knows them, keeps the values under test and passes them to the tested model at every frame. The operator changes the set with `set_parameters` and watches the score evolve in the HMI view of the module. The source and the tested model are configuration items: any module with the interface of 3 (V7, V8) can replace them. The code and the defaults of the models are never changed.
-
-Out of scope for this version: automatic search of the parameters, tracking of the boxes between frames, comparison of the classes, and pairing of boxes one by one.
 
 ## 2 Acronyms and Abbreviations
 
@@ -163,7 +159,7 @@ The module exposes the four common functions `initialize`, `calibrate`, `detect`
 | Reentrancy | Reentrant |
 | Parameters (in) | `ctx`: ignored. |
 | Return value | None |
-| Description | Nothing to learn: present for the common interface of the detection modules. |
+| Description | Minimum implementation to satisfy the common detection module interface. |
 
 #### 6.2.3 detect
 
