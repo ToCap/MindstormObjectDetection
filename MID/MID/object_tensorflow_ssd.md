@@ -16,18 +16,15 @@ In the project, the module is the AI reference: it is shown in a view of the Ope
 
 ## 3 Constraints and assumptions
 
-| ID | Assumption |
-| --- | --- |
-| O1 | TensorFlow and `tensorflow_hub` are installed. |
-| O2 | The first `initialize` downloads the model from TensorFlow Hub: it needs a network access, and it takes time. |
-| O3 | `ctx.frame` is a BGR `uint8` image of shape `(height, width, 3)`; the model accepts any size. |
-| O4 | Every call of `detect` runs an inference: it is the most expensive step of a frame. |
-| O5 | The model only knows the 90 classes of COCO; other objects are ignored or given a wrong class. |
-| O6 | The module keeps the model in a global variable and is not meant to be called from several threads. |
+- The first `initialize` downloads the model from TensorFlow Hub. *Why:* it needs a network access and takes time, so it must be done at start-up and not in the frame loop.
+- `ctx.frame` is a BGR `uint8` image of shape `(height, width, 3)`. *Why:* the module converts it to RGB itself; the model accepts any size, so there is no resizing.
+- Every call of `detect` runs an inference. *Why:* it is the most expensive step of a frame, so callers should call it once per frame.
+- The model only knows the 90 classes of COCO. *Why:* other objects are ignored or given a wrong class, so a missing detection is not a proof of absence.
+- The module keeps the model in a global variable and is not meant to be called from several threads. *Why:* a call from another thread could use the model while it loads, or run two inferences at once.
 
 ## 4 Dependencies to other modules
 
-`object_tensorflow_ssd` does not call any other module of the project; it only reads the `ctx` it receives.
+The module `object_tensorflow_ssd` has interfaces and dependencies to the following modules:
 
 ### 4.1 Internal modules
 
@@ -50,23 +47,23 @@ The module converts the frame to RGB, runs the model, and returns the boxes, the
 
 ### 5.1 Model loading
 
-**[SWS_ObjectTF_00001]** ⌈ `initialize` loads the model `https://tfhub.dev/tensorflow/ssd_mobilenet_v2/2` once. A second call does nothing. ⌋
+**[SWS_ObjectTF_00001]** `initialize` loads the model `https://tfhub.dev/tensorflow/ssd_mobilenet_v2/2` once. A second call does nothing. The loading downloads and builds the model, which takes seconds; doing it once avoids a stall at the first frame.
 
-**[SWS_ObjectTF_00002]** ⌈ A failure of the loading (no network, model not found) is not caught: the exception of `tensorflow_hub` reaches the caller. ⌋
+**[SWS_ObjectTF_00002]** A failure of the loading (no network, model not found) is not caught: the exception of `tensorflow_hub` reaches the caller. Without the model there is no detection; hiding the error would return an empty result that looks like a scene without objects.
 
 ### 5.2 Detection
 
-**[SWS_ObjectTF_00010]** ⌈ `detect` converts `ctx.frame` from BGR to RGB, makes a `uint8` tensor of it with a batch dimension, and runs the model on it. ⌋
+**[SWS_ObjectTF_00010]** `detect` converts `ctx.frame` from BGR to RGB, makes a `uint8` tensor of it with a batch dimension, and runs the model on it. The model expects an RGB `uint8` batch, whereas OpenCV frames are BGR.
 
-**[SWS_ObjectTF_00011]** ⌈ The result is made of three arrays, taken from the first (and only) image of the batch: `boxes` of shape `[N, 4]` with the normalised coordinates `(ymin, xmin, ymax, xmax)` in `[0, 1]`, `scores` of shape `[N]` in `[0, 1]`, and `classes` of shape `[N]` with the COCO class identifiers (as floating point numbers). `N` is the number of detections given by the model. ⌋
+**[SWS_ObjectTF_00011]** The result is made of three arrays, taken from the first (and only) image of the batch: `boxes` of shape `[N, 4]` with the normalised coordinates `(ymin, xmin, ymax, xmax)` in `[0, 1]`, `scores` of shape `[N]` in `[0, 1]`, and `classes` of shape `[N]` with the COCO class identifiers (as floating point numbers). `N` is the number of detections given by the model.
 
-**[SWS_ObjectTF_00012]** ⌈ `detect` does not filter the detections: all of them are returned, whatever their score. The detections are ordered by decreasing score, as given by the model. ⌋
+**[SWS_ObjectTF_00012]** `detect` does not filter the detections: all of them are returned, whatever their score. The detections are ordered by decreasing score, as given by the model. The choice of the score threshold belongs to the callers (HMI, tuning); the module stays neutral so that each can use its own.
 
 ### 5.3 Drawing
 
-**[SWS_ObjectTF_00020]** ⌈ `draw` shows only the detections whose score is greater than or equal to `score_threshold`. The coordinates are multiplied by the size of the overlay: `x = int(xmin * width)`, `y = int(ymin * height)`. ⌋
+**[SWS_ObjectTF_00020]** `draw` shows only the detections whose score is greater than or equal to `score_threshold`. The coordinates are multiplied by the size of the overlay: `x = int(xmin * width)`, `y = int(ymin * height)`. The coordinates of the model are relative to the image, so the same detection can be drawn on a view of any size.
 
-**[SWS_ObjectTF_00021]** ⌈ Each shown detection is a green rectangle with the text `name (score %)` above its top left corner (at least 20 pixels from the top of the image). The name comes from the table `LABELS` (index = class identifier); an identifier outside the table gives `class <identifier>`. ⌋
+**[SWS_ObjectTF_00021]** Each shown detection is a green rectangle with the text `name (score %)` above its top left corner (at least 20 pixels from the top of the image). The name comes from the table `LABELS` (index = class identifier); an identifier outside the table gives `class <identifier>`.
 
 ### 5.4 Error classification
 
@@ -80,7 +77,9 @@ The module exposes the four common functions `initialize`, `calibrate`, `detect`
 
 ### 6.1 Type definitions
 
-**[SWS_ObjectTF_00050]** ⌈ Type definitions of the module: ⌋
+The following Data Types shall be used for the functions defined in this specification.
+
+**[SWS_ObjectTF_00050]** Type definitions of the module:
 
 | Name | Kind | Range | Description |
 | --- | --- | --- | --- |
@@ -88,9 +87,11 @@ The module exposes the four common functions `initialize`, `calibrate`, `detect`
 
 ### 6.2 Function definitions
 
+This is a list of functions provided for upper layer modules.
+
 #### 6.2.1 initialize
 
-**[SWS_ObjectTF_00100]** ⌈ Definition of `initialize`: ⌋
+**[SWS_ObjectTF_00100]** Definition of `initialize`:
 
 | Service name | `initialize` |
 | --- | --- |
@@ -103,7 +104,7 @@ The module exposes the four common functions `initialize`, `calibrate`, `detect`
 
 #### 6.2.2 calibrate
 
-**[SWS_ObjectTF_00101]** ⌈ Definition of `calibrate`: ⌋
+**[SWS_ObjectTF_00101]** Definition of `calibrate`:
 
 | Service name | `calibrate` |
 | --- | --- |
@@ -116,7 +117,7 @@ The module exposes the four common functions `initialize`, `calibrate`, `detect`
 
 #### 6.2.3 detect
 
-**[SWS_ObjectTF_00102]** ⌈ Definition of `detect`: ⌋
+**[SWS_ObjectTF_00102]** Definition of `detect`:
 
 | Service name | `detect` |
 | --- | --- |
@@ -129,7 +130,7 @@ The module exposes the four common functions `initialize`, `calibrate`, `detect`
 
 #### 6.2.4 draw
 
-**[SWS_ObjectTF_00103]** ⌈ Definition of `draw`: ⌋
+**[SWS_ObjectTF_00103]** Definition of `draw`:
 
 | Service name | `draw` |
 | --- | --- |

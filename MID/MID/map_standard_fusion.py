@@ -8,10 +8,11 @@ import numpy as np
 
 import bbox_standard_contour as bbox_contour
 import ground_standard_texture as ground_tex
+import parameters
 
 
 # ==========================
-# CONFIGURATION
+# CONFIGURATION (taken into account at initialize())
 # ==========================
 # MAP_MODE selects the geometry of the grid:
 #  - "PIXEL": cells are blocks of CELL_SIZE_PX x CELL_SIZE_PX pixels of the
@@ -20,20 +21,22 @@ import ground_standard_texture as ground_tex
 #    (needs the pixel-to-meter calibration)
 MAP_MODE = "PIXEL"
 CELL_SIZE_PX = 16           # PIXEL mode: side of one cell, in pixels
-GROUND_COVERAGE = 0.5       # PIXEL mode: share of ground pixels for a ground cell
 
 GRID_WIDTH_M = 4.0          # grid width, in meters
 GRID_DEPTH_M = 4.0          # grid depth in front of the robot, in meters
 CELL_SIZE_M = 0.05          # side of one cell, in meters
-OBSTACLE_MARGIN_CELLS = 1   # thickness added around the contact segment of a box
-BBOX_SCALE = 1.0            # enlargement requested from bbox_contour (1.0 = none)
 
 CALIB_RECT_WIDTH_M = 0.40   # width of the rectangle laid on the floor
 CALIB_RECT_DEPTH_M = 0.60   # depth of that rectangle
 CALIB_RECT_NEAR_M = 0.30    # distance between the robot and the near edge
 CALIB_FILE = "map_calibration.json"
 
-DRAW_GRID_STEP_M = 0.5      # spacing of the ticks and of the control grid
+# ==========================
+# ADJUSTABLE PARAMETERS (run time)
+# ==========================
+GROUND_COVERAGE_RATIO = 0.5   # PIXEL mode: share of ground pixels for a ground cell
+OBSTACLE_MARGIN_CELLS = 1     # thickness added around the contact segment of a box
+DRAW_GRID_STEP_M = 0.5        # spacing of the ticks and of the control grid
 
 # Temporal debounce, to avoid flickering. One counter per cell and per
 # source, between 0 and N. On a detection it moves by "up", on a missing
@@ -44,12 +47,29 @@ DRAW_GRID_STEP_M = 0.5      # spacing of the ticks and of the control grid
 #    frames, lost at once
 # The detected state changes when the counter reaches N (becomes detected)
 # or 0 (becomes not detected); it already sits on that bound, so the counter
-# is not moved again. N = 1 disables the debounce.
+# is not moved again. N = 1 disables the debounce. Changing N restarts the
+# counters.
 DEBOUNCE_GROUND_N = 3
 DEBOUNCE_OBSTACLE_N = 3
 
+MAP_E_BAD_PARAMETER = 0x07
+_TAG = "MapFusion"
+
+_PARAMETERS = (
+    parameters.Parameter("GROUND_COVERAGE_RATIO", float, 0.0, 1.0, "ratio",
+                         "PIXEL mode: share of ground pixels for a ground cell."),
+    parameters.Parameter("OBSTACLE_MARGIN_CELLS", int, 0, 10, "cells",
+                         "Thickness added around the contact segment of a box."),
+    parameters.Parameter("DRAW_GRID_STEP_M", float, 0.05, 5.0, "m",
+                         "Spacing of the ticks and of the control grid."),
+    parameters.Parameter("DEBOUNCE_GROUND_N", int, 1, 100, "frames",
+                         "Debounce of the ground sources (fast attack)."),
+    parameters.Parameter("DEBOUNCE_OBSTACLE_N", int, 1, 100, "frames",
+                         "Debounce of the obstacle sources (slow attack)."),
+)
+
 # Sources fused into the grid, as (module, keyword arguments of detect,
-# debounce N, fast attack).
+# name of the debounce parameter, fast attack).
 # Another model is added by appending it to the right list.
 #  - ground source: detect(ctx) -> uint8 image of the frame size, 0 = no
 #    information, 1 = reference ground surface, >= 2 = ground of another
@@ -57,10 +77,8 @@ DEBOUNCE_OBSTACLE_N = 3
 #    are used if the module has them
 #  - obstacle source: detect(ctx) -> list of (x1, y1, x2, y2) boxes whose
 #    bottom edge touches the ground
-GROUND_SOURCES = [(ground_tex, {}, DEBOUNCE_GROUND_N, True)]
-OBSTACLE_SOURCES = [
-    (bbox_contour, {"scale": BBOX_SCALE}, DEBOUNCE_OBSTACLE_N, False)
-]
+GROUND_SOURCES = [(ground_tex, {}, "DEBOUNCE_GROUND_N", True)]
+OBSTACLE_SOURCES = [(bbox_contour, {}, "DEBOUNCE_OBSTACLE_N", False)]
 
 
 # interactive calibration: main.py asks for it only once, not at every frame
@@ -91,6 +109,7 @@ _ERROR_NAMES = {
     MAP_E_CALIB_FILE: "MAP_E_CALIB_FILE",
     MAP_E_BAD_FRAME: "MAP_E_BAD_FRAME",
     MAP_E_WRONG_MODE: "MAP_E_WRONG_MODE",
+    MAP_E_BAD_PARAMETER: "MAP_E_BAD_PARAMETER",
 }
 
 
@@ -133,6 +152,13 @@ class _Debounce:
 
 
 _DEBOUNCERS = {}
+
+
+def _reset_debouncers():
+    """(Re)creates the counters of every source with the current N."""
+    _DEBOUNCERS.clear()
+    for module, _, n_name, fast in GROUND_SOURCES + OBSTACLE_SOURCES:
+        _DEBOUNCERS[id(module)] = _Debounce(globals()[n_name], fast)
 
 
 # ==========================
@@ -298,10 +324,9 @@ def initialize():
     if MAP_MODE not in ("PIXEL", "METRIC"):
         raise ValueError("[MapFusion] unknown MAP_MODE %r" % (MAP_MODE,))
 
-    _DEBOUNCERS.clear()
-    for module, _, n, fast in GROUND_SOURCES + OBSTACLE_SOURCES:
+    for module, _, _, _ in GROUND_SOURCES + OBSTACLE_SOURCES:
         module.initialize()
-        _DEBOUNCERS[id(module)] = _Debounce(n, fast)
+    _reset_debouncers()
 
     _WARNED_NOT_CALIBRATED = False
     _clear_calibration()
@@ -327,6 +352,25 @@ def initialize():
 # ==========================
 # PIXEL <-> METER EQUIVALENCE
 # ==========================
+# ==========================
+# PARAMETERS
+# ==========================
+def get_parameters():
+    return parameters.describe(globals(), _PARAMETERS)
+
+
+def get_parameter(name):
+    return parameters.get_value(globals(), _PARAMETERS, name, _TAG,
+                                "MAP_E_BAD_PARAMETER", MAP_E_BAD_PARAMETER)
+
+
+def set_parameter(name, value):
+    parameters.set_value(globals(), _PARAMETERS, name, value, _TAG,
+                         "MAP_E_BAD_PARAMETER", MAP_E_BAD_PARAMETER)
+    if name.startswith("DEBOUNCE_"):
+        _reset_debouncers()
+
+
 def is_calibrated():
     """
     True if the map can be built: always in PIXEL mode (nothing to
@@ -643,7 +687,7 @@ def _ground_cells(mask):
     mask of the image size. The share of each surface is warped into the grid
     with the pixel-to-cell matrix; in PIXEL mode it is first averaged over
     the cell size. A cell is ground if the shares add up to at least
-    GROUND_COVERAGE, and takes the larger one.
+    GROUND_COVERAGE_RATIO, and takes the larger one.
     """
     cls = np.minimum(mask, 2)
     pixel = MAP_MODE == "PIXEL"
@@ -664,7 +708,7 @@ def _ground_cells(mask):
         ))
 
     cells = np.where(share[0] >= share[1], 1, 2).astype(np.uint8)
-    cells[(share[0] + share[1]) < GROUND_COVERAGE] = 0
+    cells[(share[0] + share[1]) < GROUND_COVERAGE_RATIO] = 0
     return cells
 
 
