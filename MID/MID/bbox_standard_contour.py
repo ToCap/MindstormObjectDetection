@@ -1,35 +1,72 @@
 import cv2
 
+import parameters
+
+_TAG = "BBoxContour"
+
+# ==========================
+# ADJUSTABLE PARAMETERS (run time)
+# ==========================
+MIN_AREA_PX2 = 200          # smallest contour area accepted
+MAX_AREA_PX2 = 200000       # largest contour area accepted
+MIN_ASPECT_RATIO = 0.1      # smallest width / height accepted
+MAX_ASPECT_RATIO = 10.0     # largest width / height accepted
+SCALE_RATIO = 1.0           # enlargement of each box around its centre (1.0 = none)
+
+BBOX_E_BAD_PARAMETER = 0x01
+
+_PARAMETERS = (
+    parameters.Parameter("MIN_AREA_PX2", float, 0.0, 1.0e9, "px2",
+                         "Smallest contour area accepted."),
+    parameters.Parameter("MAX_AREA_PX2", float, 0.0, 1.0e9, "px2",
+                         "Largest contour area accepted."),
+    parameters.Parameter("MIN_ASPECT_RATIO", float, 0.001, 1000.0, "ratio",
+                         "Smallest width / height accepted."),
+    parameters.Parameter("MAX_ASPECT_RATIO", float, 0.001, 1000.0, "ratio",
+                         "Largest width / height accepted."),
+    parameters.Parameter("SCALE_RATIO", float, 0.1, 10.0, "ratio",
+                         "Enlargement of each box around its centre; 1.0 means none."),
+)
+
 
 # ==========================
 # INITIALIZATION
 # ==========================
 def initialize():
     """
-    Initialize the bounding box model.
-    Currently stateless (placeholder).
+    Minimum implementation to satisfy the common detection module interface.
     """
-    print("[BBoxModel] initialize called (placeholder)")
+    print("[BBoxContour] initialize called")
 
 
 def calibrate(ctx=None):
     """
-    Optional initialization from a frame.
+    Minimum implementation to satisfy the common detection module interface.
     """
-    print("[BBoxModel] calibrate called (placeholder)")
+    print("[BBoxContour] calibrate called")
 
 
 # ==========================
-# DETECTION — BOUNDING BOXES
+# PARAMETERS
 # ==========================
-def detect(
-    ctx,
-    min_area=200,
-    max_area=200000,
-    min_aspect=0.1,
-    max_aspect=10,
-    scale=1.3
-):
+def get_parameters():
+    return parameters.describe(globals(), _PARAMETERS)
+
+
+def get_parameter(name):
+    return parameters.get_value(globals(), _PARAMETERS, name, _TAG,
+                                "BBOX_E_BAD_PARAMETER", BBOX_E_BAD_PARAMETER)
+
+
+def set_parameter(name, value):
+    parameters.set_value(globals(), _PARAMETERS, name, value, _TAG,
+                         "BBOX_E_BAD_PARAMETER", BBOX_E_BAD_PARAMETER)
+
+
+# ==========================
+# DETECTION - BOUNDING BOXES
+# ==========================
+def detect(ctx):
     edges = ctx.edges
 
     contours, _ = cv2.findContours(
@@ -41,16 +78,16 @@ def detect(
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
-        if area < min_area or area > max_area:
+        if area < MIN_AREA_PX2 or area > MAX_AREA_PX2:
             continue
 
         x, y, w, h = cv2.boundingRect(cnt)
         aspect_ratio = w / float(h)
-        if aspect_ratio < min_aspect or aspect_ratio > max_aspect:
+        if aspect_ratio < MIN_ASPECT_RATIO or aspect_ratio > MAX_ASPECT_RATIO:
             continue
 
         cx, cy = x + w // 2, y + h // 2
-        new_w, new_h = int(w * scale), int(h * scale)
+        new_w, new_h = int(w * SCALE_RATIO), int(h * SCALE_RATIO)
 
         x1 = max(0, cx - new_w // 2)
         y1 = max(0, cy - new_h // 2)

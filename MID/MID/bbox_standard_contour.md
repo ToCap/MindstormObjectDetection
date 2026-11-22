@@ -2,9 +2,9 @@
 
 ## 1 Introduction and functional overview
 
-The `bbox_standard_contour` module detects candidate objects as bounding boxes from the contour image of the frame: it takes the external contours of `ctx.edges`, keeps those whose area and aspect ratio fit the limits given to `detect`, and returns the bounding rectangle of each, optionally enlarged around its centre.
+The `bbox_standard_contour` module detects candidate objects as bounding boxes from the contour image of the frame: it takes the external contours of `ctx.edges`, keeps those whose area and aspect ratio fit the limits of its parameters, and returns the bounding rectangle of each, optionally enlarged around its centre.
 
-The module has no state. Its five filtering parameters are arguments of `detect` with default values, so every caller can use its own values: `map_standard_fusion` asks for no enlargement, and `bbox_standard_tuning` passes the parameters it tests.
+The module has no state. Its five filtering parameters are global variables of the module, adjustable at run time with `get_parameters`, `get_parameter` and `set_parameter`. There is one set of values per module, shared by all its callers (`map_standard_fusion`, the views of the HMI and `bbox_standard_tuning`).
 
 ## 2 Acronyms and Abbreviations
 
@@ -15,17 +15,14 @@ The module has no state. Its five filtering parameters are arguments of `detect`
 
 ## 3 Constraints and assumptions
 
-| ID | Assumption |
-| --- | --- |
-| B1 | `ctx.edges` is a single-channel `uint8` image (Canny followed by morphological closing) built by `preprocessing`. The thresholds of that preprocessing are shared by all modules and are not parameters of this module. |
-| B2 | The area filter applies to the area of the contour (`cv2.contourArea`), not to the area of its bounding rectangle. The area of an open or thin contour is small, whatever the size of its box. |
-| B3 | Only external contours are used (`cv2.RETR_EXTERNAL`): a contour inside another one gives no box. |
-| B4 | The module does not check its inputs: it neither validates the parameters (for example `min_area > max_area` gives no box) nor the content of `ctx.edges`. |
-| B5 | Python with OpenCV only; no TensorFlow in this module. |
+- `ctx.edges` is a single-channel `uint8` contour image built by `preprocessing` (Canny, then morphological closing). *Why:* the module does not compute contours; the thresholds of that preprocessing are shared by all the detection modules and are not parameters of this module.
+- The area filter applies to the area of the contour (`cv2.contourArea`), not to the area of its bounding rectangle. *Why:* an open or thin contour has a small area whatever the size of its box, so lines and isolated edges are rejected.
+- Only external contours are used (`cv2.RETR_EXTERNAL`). *Why:* a contour inside another one is a detail of the same object and would give a nested box.
+- The parameters are checked one by one, not together. *Why:* `set_parameter` checks each value against its own range; a combination such as `MIN_AREA_PX2 > MAX_AREA_PX2` gives no box and is not reported. The content of `ctx.edges` is not checked either, to keep the cost per frame low.
 
 ## 4 Dependencies to other modules
 
-`bbox_standard_contour` does not call any other module of the project; it only reads the `ctx` it receives.
+The module `bbox_standard_contour` has interfaces and dependencies to the following modules:
 
 ### 4.1 Internal modules
 
@@ -41,41 +38,51 @@ The module has no state. Its five filtering parameters are arguments of `detect`
 
 ## 5 Functional specification
 
-A contour gives a box if its area and its aspect ratio are inside the limits of the parameters; the box is the bounding rectangle of the contour, scaled around its centre by `scale` and clamped to the image.
+A contour gives a box if its area and its aspect ratio are inside the limits of the parameters; the box is the bounding rectangle of the contour, scaled around its centre by `SCALE_RATIO` and clamped to the image.
 
 ### 5.1 Box model
 
-**[SWS_BBoxContour_00001]** ⌈ A box is a tuple of four `int`, `(x1, y1, x2, y2)`, in pixels. The origin is the top left corner of the image, x grows to the right and y grows downward. ⌋
+**[SWS_BBoxContour_00001]** A box is a tuple of four `int`, `(x1, y1, x2, y2)`, in pixels. The origin is the top left corner of the image, x grows to the right and y grows downward.
 
-**[SWS_BBoxContour_00002]** ⌈ A returned box satisfies `0 <= x1 <= x2 <= width` and `0 <= y1 <= y2 <= height`, where `width` and `height` are the size of `ctx.edges`. ⌋
+**[SWS_BBoxContour_00002]** A returned box satisfies `0 <= x1 <= x2 <= width` and `0 <= y1 <= y2 <= height`, where `width` and `height` are the size of `ctx.edges`. The boxes are used as pixel indices by the callers (projection in the map, surfaces in the tuning); clamping guarantees that they never leave the image.
 
 ### 5.2 Detection
 
-**[SWS_BBoxContour_00010]** ⌈ The contours are the external contours of `ctx.edges` (`cv2.RETR_EXTERNAL`, `cv2.CHAIN_APPROX_SIMPLE`). ⌋
+**[SWS_BBoxContour_00010]** The contours are the external contours of `ctx.edges` (`cv2.RETR_EXTERNAL`, `cv2.CHAIN_APPROX_SIMPLE`). `RETR_EXTERNAL` avoids boxes nested in a larger one; `CHAIN_APPROX_SIMPLE` keeps only the corner points, which is enough for the area and the bounding rectangle and is cheaper.
 
-**[SWS_BBoxContour_00011]** ⌈ A contour is rejected if its area is lower than `min_area` or greater than `max_area`. ⌋
+**[SWS_BBoxContour_00011]** A contour is rejected if its area is lower than `MIN_AREA_PX2` or greater than `MAX_AREA_PX2`. The lower limit rejects noise and fine texture; the upper limit rejects contours that are the whole scene (borders, walls).
 
-**[SWS_BBoxContour_00012]** ⌈ The aspect ratio of a contour is `w / h`, with `w` and `h` the width and height of its bounding rectangle (`cv2.boundingRect`). A contour is rejected if the ratio is lower than `min_aspect` or greater than `max_aspect`. ⌋
+**[SWS_BBoxContour_00012]** The aspect ratio of a contour is `w / h`, with `w` and `h` the width and height of its bounding rectangle (`cv2.boundingRect`). A contour is rejected if the ratio is lower than `MIN_ASPECT_RATIO` or greater than `MAX_ASPECT_RATIO`. Very flat or very tall boxes are mostly edges of the floor, of walls or of door frames, not obstacles.
 
-**[SWS_BBoxContour_00013]** ⌈ The box of an accepted contour is its bounding rectangle scaled by `scale` around its centre: the centre is `(x + w // 2, y + h // 2)`, the new size is `int(w * scale)` by `int(h * scale)`, and the result is clamped to the image (SWS_BBoxContour_00002). `scale = 1.0` gives the bounding rectangle itself. ⌋
+**[SWS_BBoxContour_00013]** The box of an accepted contour is its bounding rectangle scaled by `SCALE_RATIO` around its centre: the centre is `(x + w // 2, y + h // 2)`, the new size is `int(w * SCALE_RATIO)` by `int(h * SCALE_RATIO)`, and the result is clamped to the image (SWS_BBoxContour_00002). `SCALE_RATIO = 1.0` gives the bounding rectangle itself. Scaling around the centre keeps the box centred on the object. `SCALE_RATIO = 1.0` keeps the real bottom edge, which `map_standard_fusion` uses as the contact with the ground.
 
-**[SWS_BBoxContour_00014]** ⌈ The boxes are returned in the order of the contours given by OpenCV. Two contours may give overlapping or identical boxes; the module does not merge them. ⌋
+**[SWS_BBoxContour_00014]** The boxes are returned in the order of the contours given by OpenCV. Two contours may give overlapping or identical boxes; the module does not merge them. Merging boxes would need an overlap rule; the callers already handle overlaps (the map writes cells, the tuning uses the union of surfaces).
 
 ### 5.3 Parameters
 
-**[SWS_BBoxContour_00020]** ⌈ The module has five parameters, which are arguments of `detect`: `min_area`, `max_area`, `min_aspect`, `max_aspect` and `scale`. An argument that is not given takes the default of section 8. The values apply to that call only; the module keeps no parameter between two calls. ⌋
+**[SWS_BBoxContour_00020]** The module has five parameters, which are global variables of the module: `MIN_AREA_PX2`, `MAX_AREA_PX2`, `MIN_ASPECT_RATIO`, `MAX_ASPECT_RATIO` and `SCALE_RATIO`. Their default values, types and ranges are in section 8. There is one set of values per module.
+
+**[SWS_BBoxContour_00021]** All the parameters can be changed at run time (section 8.1) with `set_parameter`; the new value is used from the next call of `detect`. `get_parameters` lists them with their current value and `get_parameter` returns the current value of one of them. The module has no parameter that requires a new `initialize` (section 8.2). The values are read at each call, so the HMI or the tuning can change them between two frames without restarting the module.
+
+**[SWS_BBoxContour_00022]** `set_parameter` refuses an unknown name, a value that is not a number of the type of the parameter (a boolean is refused) and a value outside the range of section 8 (`BBOX_E_BAD_PARAMETER`); the parameter is then unchanged. A refused value leaves the previous valid set in place; a bad value would otherwise silently give no box.
 
 ### 5.4 Error classification
 
-**[SWS_BBoxContour_00030]** ⌈ The module reports no error code (B4). An exception raised by Python or OpenCV (for example if `ctx.edges` does not exist) is not caught. ⌋
+**[SWS_BBoxContour_00030]** The only error code of the module is `BBOX_E_BAD_PARAMETER` (SWS_BBoxContour_00022), raised as `ValueError` (Development error). An exception raised by Python or OpenCV (for example if `ctx.edges` does not exist) is not caught.
+
+| Error code | Value | Type | Description |
+| --- | --- | --- | --- |
+| `BBOX_E_BAD_PARAMETER` | 0x01 | Development | Unknown parameter name, wrong type or value out of range given to `set_parameter` or `get_parameter`: `ValueError`. |
 
 ## 6 API specification
 
-The module exposes the four common functions `initialize`, `calibrate`, `detect` and `draw`.
+The module exposes the four common functions `initialize`, `calibrate`, `detect` and `draw`, plus `get_parameters`, `get_parameter` and `set_parameter`.
 
 ### 6.1 Type definitions
 
-**[SWS_BBoxContour_00050]** ⌈ Type definitions of the module: ⌋
+The following Data Types shall be used for the functions defined in this specification.
+
+**[SWS_BBoxContour_00050]** Type definitions of the module:
 
 | Name | Kind | Range | Description |
 | --- | --- | --- | --- |
@@ -83,9 +90,11 @@ The module exposes the four common functions `initialize`, `calibrate`, `detect`
 
 ### 6.2 Function definitions
 
+This is a list of functions provided for upper layer modules.
+
 #### 6.2.1 initialize
 
-**[SWS_BBoxContour_00100]** ⌈ Definition of `initialize`: ⌋
+**[SWS_BBoxContour_00100]** Definition of `initialize`:
 
 | Service name | `initialize` |
 | --- | --- |
@@ -98,7 +107,7 @@ The module exposes the four common functions `initialize`, `calibrate`, `detect`
 
 #### 6.2.2 calibrate
 
-**[SWS_BBoxContour_00101]** ⌈ Definition of `calibrate`: ⌋
+**[SWS_BBoxContour_00101]** Definition of `calibrate`:
 
 | Service name | `calibrate` |
 | --- | --- |
@@ -111,20 +120,20 @@ The module exposes the four common functions `initialize`, `calibrate`, `detect`
 
 #### 6.2.3 detect
 
-**[SWS_BBoxContour_00102]** ⌈ Definition of `detect`: ⌋
+**[SWS_BBoxContour_00102]** Definition of `detect`:
 
 | Service name | `detect` |
 | --- | --- |
-| Syntax | `detect(ctx, min_area=200, max_area=200000, min_aspect=0.1, max_aspect=10, scale=1.3) -> list[Box]` |
+| Syntax | `detect(ctx) -> list[Box]` |
 | Sync/Async | Synchronous |
 | Reentrancy | Reentrant |
-| Parameters (in) | `ctx`: `FrameContext` of the current frame. `min_area`, `max_area`, `min_aspect`, `max_aspect`, `scale`: parameters of 5.3. |
+| Parameters (in) | `ctx`: `FrameContext` of the current frame. |
 | Return value | The boxes of 5.2; an empty list if no contour is accepted. |
-| Description | Applies SWS_BBoxContour_00010 to 00014. |
+| Description | Applies SWS_BBoxContour_00010 to 00014 with the current values of the parameters. |
 
 #### 6.2.4 draw
 
-**[SWS_BBoxContour_00103]** ⌈ Definition of `draw`: ⌋
+**[SWS_BBoxContour_00103]** Definition of `draw`:
 
 | Service name | `draw` |
 | --- | --- |
@@ -134,6 +143,45 @@ The module exposes the four common functions `initialize`, `calibrate`, `detect`
 | Parameters (in) | `overlay`: BGR image, modified in place. `boxes`: result of `detect`. `color`: BGR colour. `thickness`: line width in pixels. |
 | Return value | None |
 | Description | Draws every box as a rectangle on `overlay`. |
+
+#### 6.2.5 get_parameters
+
+**[SWS_BBoxContour_00104]** Definition of `get_parameters`:
+
+| Service name | `get_parameters` |
+| --- | --- |
+| Syntax | `get_parameters() -> list[dict]` |
+| Sync/Async | Synchronous |
+| Reentrancy | Reentrant |
+| Parameters (in) | None |
+| Return value | One `dict` per parameter adjustable at run time (section 8.1), with the keys `name`, `type` (`"int"` or `"float"`), `minimum`, `maximum`, `unit`, `description` and `value` (current value). |
+| Description | Describes the parameters for the HMI and for `bbox_standard_tuning`. |
+
+#### 6.2.6 get_parameter
+
+**[SWS_BBoxContour_00105]** Definition of `get_parameter`:
+
+| Service name | `get_parameter` |
+| --- | --- |
+| Syntax | `get_parameter(name) -> int or float` |
+| Sync/Async | Synchronous |
+| Reentrancy | Reentrant |
+| Parameters (in) | `name`: name of a parameter of section 8.1. |
+| Return value | Current value of the parameter. |
+| Description | Raises `ValueError` (`BBOX_E_BAD_PARAMETER`) for an unknown name. |
+
+#### 6.2.7 set_parameter
+
+**[SWS_BBoxContour_00106]** Definition of `set_parameter`:
+
+| Service name | `set_parameter` |
+| --- | --- |
+| Syntax | `set_parameter(name, value) -> None` |
+| Sync/Async | Synchronous |
+| Reentrancy | Non-reentrant (writes a global variable) |
+| Parameters (in) | `name`: name of a parameter of section 8.1. `value`: new value, of the type and in the range of section 8. |
+| Return value | None |
+| Description | Applies SWS_BBoxContour_00022 and stores the value; it is used from the next call of `detect`. |
 
 ## 7 Sequence diagrams
 
@@ -153,14 +201,29 @@ sequenceDiagram
     Note right of B: contours, area and aspect filters, scale
     B-->>M: boxes
     M->>B: draw(overlay, boxes)
+
+    Note over M,B: Tuning, at any time
+    M->>B: get_parameters()
+    B-->>M: names, ranges, current values
+    M->>B: set_parameter(name, value)
 ```
 
 ## 8 Configuration specification
 
-| Parameter name | Type | Range | Default | Description |
-| --- | --- | --- | --- | --- |
-| `min_area` | float | ≥ 0 | 200 | Smallest contour area accepted, in pixels². |
-| `max_area` | float | ≥ `min_area` | 200000 | Largest contour area accepted, in pixels². |
-| `min_aspect` | float | > 0 | 0.1 | Smallest `width / height` accepted. |
-| `max_aspect` | float | ≥ `min_aspect` | 10 | Largest `width / height` accepted. |
-| `scale` | float | > 0 | 1.3 | Enlargement of the bounding rectangle around its centre; 1.0 means none. `map_standard_fusion` asks for 1.0. |
+The parameters are global variables at the top of `bbox_standard_contour.py`. There is one set of values per module.
+
+### 8.1 Parameters adjustable at run time
+
+Available through `get_parameters`, `get_parameter` and `set_parameter`; a new value is used from the next call of `detect`.
+
+| Parameter name | Type | Range | Default | Unit | Description |
+| --- | --- | --- | --- | --- | --- |
+| `MIN_AREA_PX2` | float | [0, 1e9] | 200 | px² | Smallest contour area accepted, in pixels². |
+| `MAX_AREA_PX2` | float | [0, 1e9] | 200000 | px² | Largest contour area accepted, in pixels². |
+| `MIN_ASPECT_RATIO` | float | [0.001, 1000] | 0.1 | ratio | Smallest `width / height` accepted. |
+| `MAX_ASPECT_RATIO` | float | [0.001, 1000] | 10 | ratio | Largest `width / height` accepted. |
+| `SCALE_RATIO` | float | [0.1, 10] | 1.0 | ratio | Enlargement of the bounding rectangle around its centre; 1.0 means none. |
+
+### 8.2 Parameters that require `initialize`
+
+None.
